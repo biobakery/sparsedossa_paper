@@ -1,0 +1,42 @@
+---
+title: "Fit HMP1-II Stool"
+author: "Siyuan Ma"
+date: "8/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/Users/Siyuan/Git/sparsedossa2_paper/")
+knitr::opts_chunk$set(echo=FALSE)
+library(magrittr)
+library(ggplot2)
+```
+
+```{r load stool}
+load("data/physeqs/HMP1II_stool.RData")
+
+x_samples_stool <- physeq_stool %>% 
+  smar::otu_table2() 
+# subset to top 200 samples and 250 features
+x_samples_stool <- 
+  x_samples_stool[, 
+                  order(-apply(x_samples_stool, 2, sum))[seq(1, 200)]]
+x_samples_stool <- 
+  x_samples_stool[apply(x_samples_stool > 0, 1, sum) >= 2, ]
+x_samples_stool <- 
+  x_samples_stool[apply(x_samples_stool, 2, SparseDOSSA2:::TSS) %>% 
+                      apply(1, mean) %>% 
+                      {order(-.)[1:250]}, ]
+```
+
+```{r fit to stool}
+future::plan(future::multisession())
+fit_EM <- SparseDOSSA2::fit_SparseDOSSA2(
+  data = x_samples_stool,
+  lambda = 1,
+  control = list(abs_tol = 1e-3,
+                 rel_tol = 1e-3,
+                 maxit = 30,
+                 verbose = TRUE))
+save(fit_EM, file = "results/fits/stool_fit.RData")
+```

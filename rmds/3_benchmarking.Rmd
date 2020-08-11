@@ -1,0 +1,103 @@
+---
+title: "Spike in metadata"
+author: "Siyuan Ma"
+date: "8/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/Users/Siyuan/Git/sparsedossa2_paper/")
+knitr::opts_chunk$set(echo=FALSE)
+library(magrittr)
+library(ggplot2)
+```
+
+```{r load stool data and set param}
+load("results/fits/stool_fit.RData")
+features_all <- names(fit_EM$EM_fit$fit$pi0)
+features_toSpike <- names(fit_EM$EM_fit$fit$pi0)[seq(1, 200, by = 25)]
+effect_sizes <- rep(c(1, -1), 4)
+```
+
+```{r get median read depth}
+load("data/physeqs/HMP1II_stool.RData")
+
+x_samples_stool <- physeq_stool %>% 
+  smar::otu_table2() 
+# subset to top 200 samples and 250 features
+x_samples_stool <- 
+  x_samples_stool[, 
+                  order(-apply(x_samples_stool, 2, sum))[seq(1, 200)]]
+x_samples_stool <- 
+  x_samples_stool[apply(x_samples_stool > 0, 1, sum) >= 2, ]
+x_samples_stool <- 
+  x_samples_stool[apply(x_samples_stool, 2, SparseDOSSA2:::TSS) %>% 
+                      apply(1, mean) %>% 
+                      {order(-.)[1:250]}, ]
+read_depth_median <- apply(x_samples_stool, 2, sum) %>% median()
+```
+
+```{r simulation grid}
+source("R/DA.R")
+
+tb_bench <- rbind(
+  data.frame(n = c(50, 100, 200),
+             effect_size = 1),
+  data.frame(n = 100,
+             effect_size = c(2, 4))
+) %>% 
+  tidyr::expand_grid(
+    method = c("Maaslin2",
+               "DESeq2",
+               "metagenomeSeq"),
+    R = seq(1, 500)
+  )
+```
+
+```{r one job}
+one_job <- function(i_job) {
+  i_tb_bench <- tb_bench[i_job, ]
+  
+  metadata <- matrix(rep(c(0, 1), each = i_tb_bench$n / 2),
+                   nrow = i_tb_bench$n, 
+                   ncol = 1)
+  rownames(metadata) <- paste0("Sample", seq(1, i_tb_bench$n))
+  
+  df_spike <- data.frame(
+    metadata_datum = 1,
+    feature_spiked = features_toSpike,
+    associated_property = "abundance",
+    effect_size = effect_sizes * i_tb_bench$effect_size)
+  
+  fit_simulation <- SparseDOSSA2::SparseDOSSA2(
+    template = fit_EM,
+    n_sample = i_tb_bench$n, 
+    new_features = FALSE,
+    spike_metadata = "abundance",
+    feature_metadata_spike_df = df_spike,
+    metadata_matrix = metadata,
+    median_read_depth = read_depth_median)
+  
+  mat_abd_simulated <- fit_simulation$simulated_data
+  df_metadata <- data.frame(metadata)
+  colnames(df_metadata) <- "Exposure"
+  df_metadata$Exposure <- factor(df_metadata$Exposure,
+                            levels = c(0, 1))
+  
+  DA_sum <- DA(data = mat_abd_simulated,
+               metadata = df_metadata,
+               method = i_tb_bench$method,
+               features_TP = features_toSpike,
+               i = i_job)
+  
+  return(DA_sum)
+}
+```
+
+```{r run jobs}
+future::plan(future::multisession())
+results <- future.apply::future_vapply(seq_len(nrow(tb_bench)),
+                                       one_job,
+                                       c(0, 0))
+save(results, file = "results/DA/DA_results.RData")
+```

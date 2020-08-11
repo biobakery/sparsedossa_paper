@@ -1,0 +1,339 @@
+---
+title: "Spike in metadata"
+author: "Siyuan Ma"
+date: "8/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/Users/Siyuan/Git/sparsedossa2_paper/")
+knitr::opts_chunk$set(echo=FALSE)
+library(magrittr)
+library(ggplot2)
+```
+
+```{r load stool data and set param}
+load("results/fits/stool_fit.RData")
+metadata <- matrix(rep(c(0, 1), each = 500),
+                   nrow = 1000, 
+                   ncol = 1)
+features_all <- names(fit_EM$EM_fit$fit$pi0)
+features_toSpike <- names(fit_EM$EM_fit$fit$pi0)[seq(1, 200, by = 25)]
+effect_sizes <- rep(c(1, -1), 4)
+```
+
+```{r get median read depth}
+load("data/physeqs/HMP1II_stool.RData")
+
+x_samples_stool <- physeq_stool %>% 
+  smar::otu_table2() 
+# subset to top 200 samples and 250 features
+x_samples_stool <- 
+  x_samples_stool[, 
+                  order(-apply(x_samples_stool, 2, sum))[seq(1, 200)]]
+x_samples_stool <- 
+  x_samples_stool[apply(x_samples_stool > 0, 1, sum) >= 2, ]
+x_samples_stool <- 
+  x_samples_stool[apply(x_samples_stool, 2, SparseDOSSA2:::TSS) %>% 
+                      apply(1, mean) %>% 
+                      {order(-.)[1:250]}, ]
+read_depth_median <- apply(x_samples_stool, 2, sum) %>% median()
+```
+
+```{r continuous part spike-in}
+set.seed(1)
+df_spike <- data.frame(
+  metadata_datum = 1,
+  feature_spiked = features_toSpike,
+  associated_property = "abundance",
+  effect_size = effect_sizes
+)
+
+fit_simulation <- SparseDOSSA2::SparseDOSSA2(
+  template = fit_EM,
+  n_sample = 1000, 
+  new_features = FALSE,
+  spike_metadata = "abundance",
+  feature_metadata_spike_df = df_spike,
+  metadata_matrix = metadata,
+  median_read_depth = read_depth_median
+)
+
+mat_abd_simulated <- fit_simulation$simulated_data %>% 
+  apply(2, SparseDOSSA2:::TSS)
+
+df_effectSize <- features_all %>% 
+  purrr::map_dfr(function(i_feature) {
+    ind <- mat_abd_simulated[i_feature, ] > 0
+    y <- log(mat_abd_simulated[i_feature, ind])
+    x <- metadata[ind, 1]
+    fit_lm <- lm(y ~ x)
+    data.frame(feature = i_feature,
+               estimate = summary(fit_lm)$coef[2, 1],
+               se = summary(fit_lm)$coef[2, 2],
+               p = summary(fit_lm)$coef[2, 4])
+  })
+
+p_abd <- df_effectSize %>% 
+  dplyr::mutate(spiked = ifelse(feature %in% features_toSpike,
+                                "Spiked",
+                                "Not spiked") %>% 
+                  factor(levels = c("Spiked", "Not spiked")),
+                sig = ifelse(p < 0.05,
+                             "Sig.",
+                             "N.S.") %>% 
+                  factor(levels = c("Sig.", "N.S."))) %>% 
+  dplyr::arrange(spiked, 
+                 abs(estimate) * 
+                   ifelse(spiked == "Spiked",
+                          0,
+                          -1)) %>% 
+  dplyr::mutate(feature = feature %>% forcats::as_factor()) %>% 
+  ggplot(aes(x = feature,
+             y = estimate,
+             color = spiked,
+             alpha = sig)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(y = estimate,
+                    ymax = estimate + 1.96 * se,
+                    ymin = estimate - 1.96 *se)) +
+  scale_color_manual(values = c("Spiked" = "red",
+                                "Not spiked" = "black")) +
+  scale_alpha_manual(values = c("Sig." = 1, "N.S." = 0.3)) +
+  scale_y_continuous(breaks = c(-1, 0, 1), 
+                     limits = c(-2, 2),
+                     oob = scales::oob_keep) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  geom_hline(yintercept = 1, color = "red", linetype = "dashed") +
+  geom_hline(yintercept = -1, color = "red", linetype = "dashed") +
+  theme_bw() +
+  theme(axis.ticks.x = element_blank(),
+        axis.text.x = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = c(1, 1),
+        legend.justification = c(1, 1),
+        legend.background = element_blank(),
+        legend.direction = "horizontal") +
+  xlab("Feature") + ylab("Mean diff (log)")
+```
+
+```{r discrete part spike-in}
+set.seed(1)
+df_spike <- data.frame(
+  metadata_datum = 1,
+  feature_spiked = features_toSpike,
+  associated_property = "prevalence",
+  effect_size = effect_sizes
+)
+
+fit_simulation <- SparseDOSSA2::SparseDOSSA2(
+  template = fit_EM,
+  n_sample = 1000, 
+  new_features = FALSE,
+  spike_metadata = "presence",
+  feature_metadata_spike_df = df_spike,
+  metadata_matrix = metadata,
+  median_read_depth = read_depth_median
+)
+
+mat_prev_simulated <- fit_simulation$simulated_data %>% 
+  apply(2, SparseDOSSA2:::TSS)
+
+df_effectSize <- features_all %>% 
+  purrr::map_dfr(function(i_feature) {
+    y <- (mat_prev_simulated[i_feature, ] > 0) * 1
+    x <- metadata[, 1]
+    fit_glm <- glm(y ~ x, family = "binomial")
+    data.frame(feature = i_feature,
+               estimate = summary(fit_glm)$coef[2, 1],
+               se = summary(fit_glm)$coef[2, 2],
+               p = summary(fit_glm)$coef[2, 4])
+  })
+
+p_prev <- df_effectSize %>% 
+  dplyr::mutate(spiked = ifelse(feature %in% features_toSpike,
+                                "Spiked",
+                                "Not spiked") %>% 
+                  factor(levels = c("Spiked", "Not spiked")),
+                sig = ifelse(p < 0.05,
+                             "Sig.",
+                             "N.S.") %>% 
+                  factor(levels = c("Sig.", "N.S."))) %>% 
+  dplyr::arrange(spiked, 
+                 abs(estimate) * 
+                   ifelse(spiked == "Spiked",
+                          0,
+                          -1)) %>% 
+  dplyr::mutate(feature = feature %>% forcats::as_factor()) %>% 
+  ggplot(aes(x = feature,
+             y = estimate,
+             color = spiked,
+             alpha = sig)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(y = estimate,
+                    ymax = estimate + 1.96 * se,
+                    ymin = estimate - 1.96 *se)) +
+  scale_color_manual(values = c("Spiked" = "red",
+                                "Not spiked" = "black")) +
+  scale_alpha_manual(values = c("Sig." = 1, "N.S." = 0.3)) +
+  scale_y_continuous(breaks = c(-1, 0, 1), 
+                     limits = c(-2, 2),
+                     oob = scales::oob_keep) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  geom_hline(yintercept = 1, color = "red", linetype = "dashed") +
+  geom_hline(yintercept = -1, color = "red", linetype = "dashed") +
+  theme_bw() +
+  theme(axis.ticks.x = element_blank(),
+        axis.text.x = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = c(1, 1),
+        legend.justification = c(1, 1),
+        legend.background = element_blank(),
+        legend.direction = "horizontal") +
+  xlab("Feature") + ylab("Log OR")
+```
+
+```{r feature-feature spike in}
+set.seed(1)
+features_sub <- features_all[1:10]
+fit_EM_sub <- fit_EM
+fit_EM_sub$EM_fit$fit <- 
+  list(pi0 = fit_EM_sub$EM_fit$fit$pi0[features_sub],
+       mu = fit_EM_sub$EM_fit$fit$mu[features_sub],
+       sigma = fit_EM_sub$EM_fit$fit$sigma[features_sub],
+       Sigma = diag(rep(1, 10)),
+       Omega = diag(rep(1, 10)))
+features_toSpike <- features_sub[sample.int(10, size = 4)]
+
+metadata <- matrix(rnorm(2000000),
+                   nrow = 1000000, 
+                   ncol = 2)
+df_spike <- data.frame(
+  metadata_datum = c(1, 1, 2, 2),
+  feature_spiked = features_toSpike,
+  associated_property = "abundance",
+  effect_size = c(1, 1, 1, -1)
+)
+
+fit_simulation <- SparseDOSSA2::SparseDOSSA2(
+  template = fit_EM_sub,
+  n_sample = 1000000, 
+  new_features = FALSE,
+  spike_metadata = "abundance",
+  feature_metadata_spike_df = df_spike,
+  metadata_matrix = metadata,
+  median_read_depth = read_depth_median
+)
+
+cor_a <- fit_simulation$simulated_matrices$a_null %>% 
+  t() %>% cor(method = "sp")
+cor_rel <- fit_simulation$simulated_matrices$a_null %>% 
+  apply(2, SparseDOSSA2:::TSS) %>% 
+  t() %>% cor(method = "sp")
+
+tb_1 <- list(cor_a, cor_rel) %>% 
+  purrr::map2_dfr(c("Abs", "Rel"),
+                  function(cor_mat, class)
+                    cor_mat %>% 
+                    as.data.frame() %>% 
+                    tibble::rownames_to_column("Feature1") %>% 
+                    tidyr::pivot_longer(cols = dplyr::all_of(features_sub),
+                                        names_to = "Feature2",
+                                        values_to = "Cor") %>% 
+                    dplyr::mutate(Feature1 = factor(Feature1, levels = features_sub),
+                                  Feature2 = factor(Feature2, levels = features_sub)) %>% 
+                    dplyr::filter(class == "Abs" & as.integer(Feature1) > as.integer(Feature2) |
+                                    class == "Rel" & as.integer(Feature1) < as.integer(Feature2))) %>% 
+  dplyr::mutate(case = "Null")
+
+
+cor_a <- fit_simulation$simulated_matrices$a_spiked %>% 
+  t() %>% cor(method = "sp")
+cor_rel <- fit_simulation$simulated_matrices$rel %>% 
+  t() %>% cor(method = "sp")
+tb_2 <- list(cor_a, cor_rel) %>% 
+  purrr::map2_dfr(c("Abs", "Rel"),
+                  function(cor_mat, class)
+                    cor_mat %>% 
+                    as.data.frame() %>% 
+                    tibble::rownames_to_column("Feature1") %>% 
+                    tidyr::pivot_longer(cols = dplyr::all_of(features_sub),
+                                        names_to = "Feature2",
+                                        values_to = "Cor") %>% 
+                    dplyr::mutate(Feature1 = factor(Feature1, levels = features_sub),
+                                  Feature2 = factor(Feature2, levels = features_sub)) %>% 
+                    dplyr::filter(class == "Abs" & as.integer(Feature1) > as.integer(Feature2) |
+                                    class == "Rel" & as.integer(Feature1) < as.integer(Feature2))) %>% 
+  dplyr::mutate(case = "Strength = 1")
+
+df_spike <- data.frame(
+  metadata_datum = c(1, 1, 2, 2),
+  feature_spiked = features_toSpike,
+  associated_property = "abundance",
+  effect_size = c(5, 5, 5, -5)
+)
+
+fit_simulation <- SparseDOSSA2::SparseDOSSA2(
+  template = fit_EM_sub,
+  n_sample = 1000000, 
+  new_features = FALSE,
+  spike_metadata = "abundance",
+  feature_metadata_spike_df = df_spike,
+  metadata_matrix = metadata,
+  median_read_depth = read_depth_median
+)
+
+cor_a <- fit_simulation$simulated_matrices$a_spiked %>% 
+  t() %>% cor(method = "sp")
+cor_rel <- fit_simulation$simulated_matrices$rel %>% 
+  t() %>% cor(method = "sp")
+tb_3 <- list(cor_a, cor_rel) %>% 
+  purrr::map2_dfr(c("Abs", "Rel"),
+                  function(cor_mat, class)
+                    cor_mat %>% 
+                    as.data.frame() %>% 
+                    tibble::rownames_to_column("Feature1") %>% 
+                    tidyr::pivot_longer(cols = dplyr::all_of(features_sub),
+                                        names_to = "Feature2",
+                                        values_to = "Cor") %>% 
+                    dplyr::mutate(Feature1 = factor(Feature1, levels = features_sub),
+                                  Feature2 = factor(Feature2, levels = features_sub)) %>% 
+                    dplyr::filter(class == "Abs" & as.integer(Feature1) > as.integer(Feature2) |
+                                    class == "Rel" & as.integer(Feature1) < as.integer(Feature2))) %>% 
+  dplyr::mutate(case = "Strength = 5")
+
+p_cor <- rbind(tb_1, tb_2, tb_3) %>% 
+  dplyr::mutate(case = case %>% forcats::as_factor()) %>% 
+  dplyr::mutate(
+    TP = ifelse(Feature1 == features_toSpike[1] & Feature2 == features_toSpike[2] |
+                  Feature2 == features_toSpike[1] & Feature1 == features_toSpike[2] |
+                  Feature1 == features_toSpike[3] & Feature2 == features_toSpike[4] |
+                  Feature1 == features_toSpike[4] & Feature2 == features_toSpike[3],
+                "TP",
+                "FP"
+    )) %>% 
+  ggplot(aes(x = Feature1, y = Feature2, fill = Cor, color = TP, size = TP)) +
+  geom_tile(width = 0.9, height = 0.9) +
+  theme_bw() +
+  scale_fill_gradient2(breaks = seq(-1, 1, length.out = 11),
+                       limits = c(-1, 1),
+                       low = "blue", mid = "white", high = "red",
+                       midpoint = 0) +
+  scale_color_manual(values = c("TP" = "yellow",
+                                "FP" = "white")) +
+  scale_size_manual(values = c("TP" = 1,
+                                "FP" = 0)) +
+  theme(panel.grid = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank()) +
+  facet_grid(.~case) +
+  coord_fixed() +
+  xlab("Spearman (absolute)") + ylab("Spearman (relative)")
+
+cowplot::plot_grid(p_abd, p_prev, ncol = 1) %>% 
+  cowplot::plot_grid(p_cor, ncol = 1, rel_heights = c(1, 0.75)) %>% 
+  ggsave("/Users/Siyuan/Git/sparsedossa2_paper/figures/Fig3/Fig3_assoc.pdf",
+         ., width = 10, height = 9)
+```
