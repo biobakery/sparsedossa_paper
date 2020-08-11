@@ -18,11 +18,13 @@ DA <- function(data, metadata,
                 na.rm = TRUE)
   }
   if(method == "DESeq2") {
-    fit_DA <- DESeq2::DESeqDataSetFromMatrix(
+    tmp <- capture.output(
+      fit_DA <- DESeq2::DESeqDataSetFromMatrix(
       countData = data + 1,
       colData = metadata,
-      design= ~ Exposure)
-    fit_DA <- DESeq2::DESeq(fit_DA)
+      design= ~ Exposure))
+    tmp <- capture.output(
+      fit_DA <- DESeq2::DESeq(fit_DA))
     results <- DESeq2::results(fit_DA)
     n_TP <- sum(results$pvalue < 0.05 & 
                   rownames(results) %in% features_TP,
@@ -32,16 +34,18 @@ DA <- function(data, metadata,
                 na.rm = TRUE)
   }
   if(method == "metagenomeSeq") {
-    Mobj <- metagenomeSeq::newMRexperiment(
-      counts = data,
-      phenoData = Biobase::AnnotatedDataFrame(metadata),
-      featureData = Biobase::AnnotatedDataFrame(data.frame(rownames(data),
-                                                           row.names = rownames(data)))
-    )
-    Mobj_norm <- metagenomeSeq::cumNorm(Mobj)
+    tmp <- capture.output(
+      Mobj <- metagenomeSeq::newMRexperiment(
+        counts = data,
+        phenoData = Biobase::AnnotatedDataFrame(metadata),
+        featureData = Biobase::AnnotatedDataFrame(data.frame(rownames(data),
+                                                             row.names = rownames(data)))
+      ))
+    tmp <- capture.output(
+      Mobj_norm <- metagenomeSeq::cumNorm(Mobj))
     mod <- model.matrix(~ 1 + Exposure, data = metadata)
-    fit_DA <- metagenomeSeq::fitFeatureModel(Mobj_norm,
-                                             mod)
+    tmp <- capture.output(fit_DA <- metagenomeSeq::fitFeatureModel(Mobj_norm,
+                                                                   mod))
     results <- metagenomeSeq::MRcoefs(fit_DA, number = nrow(data))
     n_TP <- sum(results$pvalues < 0.05 & 
                   rownames(results) %in% features_TP,
