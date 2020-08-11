@@ -19,7 +19,7 @@ DA <- function(data, metadata,
   }
   if(method == "DESeq2") {
     fit_DA <- DESeq2::DESeqDataSetFromMatrix(
-      countData = data,
+      countData = data + 1,
       colData = metadata,
       design= ~ Exposure)
     fit_DA <- DESeq2::DESeq(fit_DA)
