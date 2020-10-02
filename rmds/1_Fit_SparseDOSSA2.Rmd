@@ -1,0 +1,116 @@
+---
+title: "Fit SparseDOSSA 2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/n/janson_lab/lab/sma/sparsedossa_paper/")
+knitr::opts_chunk$set(echo=FALSE)
+library(magrittr)
+library(ggplot2)
+```
+
+```{r setup2, include=FALSE}
+# Registry
+# batchtools::makeRegistry(file.dir = "r_batchtools_reg/fit_SparseDOSSA2/",
+#                          package = "magrittr")
+batchtools::loadRegistry(file.dir = "r_batchtools_reg/fit_SparseDOSSA2", 
+                         writeable = TRUE)
+batchtools::clearRegistry()
+
+# Grid parameters
+ncpus <- 30
+partition <- "janson_cascade,janson,janson_bigmem,shared"
+walltime <- 48 * 3600
+
+# Output dir
+dir_output <- "/n/janson_lab/lab/sma/sparsedossa_paper/results/fitted/SparseDOSSA2/"
+dir.create(dir_output, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r setup simulation params}
+tb_job <- tidyr::expand_grid(
+    lambdas = 10^seq(from = 0, to = -3, length.out = 7),
+    dataset = c("vaginal", "IBD", "stool")
+  ) %>% 
+  dplyr::mutate(i_job = seq_len(dplyr::n()))
+save(tb_job, file = paste0(dir_output, "tb_job.RData"))
+```
+
+```{r simulation task}
+one_job <- function(i_job) {
+  future::plan(list(future::sequential, future::sequential, future::multicore))
+  i_tb_job <- tb_job[i_job, ]
+  
+  load(paste0("data/physeqs/", i_tb_job$dataset, ".RData"))
+  x_samples <- get(paste0("physeq_", i_tb_job$dataset, "_bl")) %>% 
+    smar::otu_table2()
+  
+  # fit SparseDOSSA 2
+  fit_EM <- SparseDOSSA2::fitCV_SparseDOSSA2(
+    data = x_samples,
+    lambdas = i_tb_job$lambdas,
+    K = 10,
+    control = list(abs_tol = 1e-2,
+                   rel_tol = 1e-3,
+                   maxit = 50,
+                   verbose = TRUE,
+                   debug_dir = paste0(dir_output, i_job, "/")))
+  save(fit_EM, file = paste0(dir_output, "fit_", i_job, ".RData"))
+}
+```
+
+```{r submit jobs}
+time_start <- Sys.time()
+tb_ids <- batchtools::batchMap(one_job, 
+                               i_job = tb_job$i_job)
+batchtools::batchExport(mget(ls()))
+batchtools::submitJobs(resources =  list(ncpus = ncpus, 
+                                         partition = partition, 
+                                         walltime = walltime))
+print(Sys.time() - time_start)
+```
+
+```{r examine results}
+# tb_fit <- tb_job %>%
+#   dplyr::group_by(i_job) %>%
+#   dplyr::mutate(fit = {
+#     load(paste0("results/fitted/SparseDOSSA2/fit_",
+#                 i_job, ".RData"))
+#     fit_EM %>% list()
+#   }) %>%
+#   dplyr::ungroup()
+# tb_fit <- tb_fit %>%
+#   dplyr::group_by(i_job) %>%
+#   dplyr::mutate(logLik = fit[[1]]$EM_fit$fit$logLik,
+#                 logLik_CV =
+#                   fit[[1]]$EM_fit$logLik_CV[, 1] %>%
+#                   mean(),
+#                 logLik_CV_sd =
+#                   fit[[1]]$EM_fit$logLik_CV[, 1] %>%
+#                   {sd(.)/sqrt(length(.))}) %>%
+#   dplyr::ungroup()
+# tb_fit %>%
+#   ggplot(aes(x = log10(lambdas),
+#              y = logLik_CV)) +
+#   geom_point() +
+#   geom_point(data = tb_fit,
+#              aes(x = log10(lambdas),
+#                  y = logLik), color = "red") +
+#   geom_errorbar(aes(ymin = logLik_CV - logLik_CV,
+#                     ymax = logLik_CV + logLik_CV)) +
+#   facet_grid(dataset~., scales = "free_y")
+# 
+# tb_bestFit <- tb_fit %>% 
+#   dplyr::group_by(dataset) %>%
+#   dplyr::arrange(-logLik_CV) %>%
+#   dplyr::slice(1) %>%
+#   dplyr::ungroup()
+# 
+# for(i in seq_len(nrow(tb_bestFit))) {
+#   fit_SparseDOSSA2 <- tb_bestFit$fit[[i]]
+#   save(fit_SparseDOSSA2,
+#        file = paste0("results/fitted/SparseDOSSA2_",
+#                      tb_bestFit$dataset[i], ".RData"))
+# }
+```
