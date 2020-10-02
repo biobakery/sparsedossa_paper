@@ -1,0 +1,194 @@
+---
+title: "Format the datasets used in this paper"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: inline
+---
+```{r setup, include=FALSE}
+rm(list = ls())
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r source functions, include=FALSE}
+library(magrittr)
+library(ggplot2)
+```
+
+```{r create HMP1-II stool and vaginal datasets}
+# metadata
+metaphlan_log <- read.delim("data/raw/hmp1-II_humann2_logs-mtd.pcl",
+                            sep = "\t",
+                            check.names = FALSE,
+                            stringsAsFactors = FALSE)
+df_metadata <- metaphlan_log %>% 
+  t() %>% 
+  as.data.frame(check.names = FALSE, stringsAsFactors = FALSE) %>% 
+  set_colnames(unlist(.[1, ])) %>% 
+  dplyr::slice(-1)
+df_metadata <- df_metadata %>% 
+  dplyr::mutate(READS_initial = as.integer(READS_initial),
+                READS_pangenomes_aligned = as.integer(READS_pangenomes_aligned),
+                READS_pangenomes_aligned_frac = 
+                  as.numeric(READS_pangenomes_aligned_frac),
+                read_depth = READS_initial * 0.05)
+# need to set rownames as dplyr discards them
+df_metadata <- df_metadata %>% 
+  set_rownames(colnames(metaphlan_log)[-1])
+
+# abd matrix
+metaphlan <- read.delim("data/raw/hmp1-II_metaphlan2-mtd-qcd.pcl",
+                        sep = "\t",
+                        check.names = FALSE,
+                        stringsAsFactors = FALSE)
+mat_abd <- metaphlan[-(1:8), -1] %>% 
+  as.matrix %>% 
+  apply(2, as.numeric) %>% 
+  set_rownames(metaphlan[-(1:8), 1])
+
+# common samples
+samples_common <- intersect(rownames(df_metadata),
+                            colnames(mat_abd))
+physeq_all <- phyloseq::phyloseq(phyloseq::otu_table(mat_abd[, samples_common], 
+                                                    taxa_are_rows = TRUE),
+                                phyloseq::sample_data(
+                                  df_metadata[samples_common, ]))
+taxa_bacteria <- phyloseq::taxa_names(physeq_all) %>% 
+  stringr::str_subset(stringr::fixed("k__Bacteria"))
+physeq_all <- physeq_all %>% 
+  phyloseq::prune_taxa(taxa_bacteria, .)
+
+# species level data
+physeq_species <- phyloseq::taxa_names(physeq_all) %>% 
+  {and(stringr::str_detect(., stringr::fixed("|s__")),
+       !stringr::str_detect(., stringr::fixed("|t__")))} %>% 
+  phyloseq::prune_taxa(physeq_all)
+
+# transform to counts
+df_metadata <- smar::sample_data2(physeq_species)
+mat_abd <- smar::otu_table2(physeq_species) %>% 
+  t() %>% `*`(df_metadata$read_depth) %>% t() %>% 
+  round()
+df_metadata$read_depth <- apply(mat_abd, 2, sum)
+mat_taxa <- phyloseq::taxa_names(physeq_species) %>% 
+  stringr::str_split_fixed(stringr::fixed("|"), n = 7)
+dimnames(mat_taxa) <- list(
+  phyloseq::taxa_names(physeq_species),
+  paste0("Rank", 1:7)
+)
+physeq_1II <- phyloseq::phyloseq(
+  phyloseq::otu_table(mat_abd, taxa_are_rows = TRUE),
+  phyloseq::sample_data(df_metadata),
+  phyloseq::tax_table(mat_taxa)
+) %>% 
+  smar::prune_taxaSamples()
+physeq_stool <- physeq_1II %>% 
+  phyloseq::subset_samples(STSite == "Stool") %>% 
+  smar::prune_taxaSamples()
+physeq_vaginal <- physeq_1II %>% 
+  phyloseq::subset_samples(STSite == "Posterior_fornix") %>% 
+  smar::prune_taxaSamples()
+
+save(physeq_1II, file = "data/physeqs/HMP1II_all.RData")
+save(physeq_stool, file = "data/physeqs/HMP1II_stool.RData")
+save(physeq_vaginal, file = "data/physeqs/HMP1II_vaginal.RData")
+```
+
+```{r format HMPII}
+df_metadata <- readr::read_csv("data/raw/hmp2_metadata.csv", guess_max = 10000)
+df_metadata <- df_metadata %>% 
+  dplyr::filter(data_type == "metagenomics") %>% 
+  dplyr::mutate(read_depth = 0.05 * reads_raw)
+df_metadata <- df_metadata %>% 
+  as.data.frame(check.names = FALSE) %>% 
+  set_rownames(df_metadata$`External ID`)
+
+# abd matrix
+metaphlan <- read.delim("data/raw/taxonomic_profiles.tsv",
+                        sep = "\t",
+                        check.names = FALSE,
+                        stringsAsFactors = FALSE)
+mat_abd <- metaphlan[-1, -1] %>% 
+  as.matrix %>% 
+  apply(2, as.numeric) %>% 
+  set_rownames(metaphlan[-1, 1])
+
+# common samples
+samples_common <- intersect(rownames(df_metadata),
+                            colnames(mat_abd))
+physeq_all <- phyloseq::phyloseq(phyloseq::otu_table(mat_abd[, samples_common], 
+                                                    taxa_are_rows = TRUE),
+                                phyloseq::sample_data(
+                                  df_metadata[samples_common, ]))
+taxa_bacteria <- phyloseq::taxa_names(physeq_all) %>% 
+  stringr::str_subset(stringr::fixed("k__Bacteria"))
+physeq_all <- physeq_all %>% 
+  phyloseq::prune_taxa(taxa_bacteria, .)
+
+# species level data
+physeq_species <- phyloseq::taxa_names(physeq_all) %>% 
+  {and(stringr::str_detect(., stringr::fixed("|s__")),
+       !stringr::str_detect(., stringr::fixed("|t__")))} %>% 
+  phyloseq::prune_taxa(physeq_all)
+
+# transform to counts
+df_metadata <- smar::sample_data2(physeq_species)
+mat_abd <- smar::otu_table2(physeq_species) %>% 
+  t() %>% `*`(df_metadata$read_depth) %>% t() %>% 
+  round()
+df_metadata$read_depth <- apply(mat_abd, 2, sum)
+mat_taxa <- phyloseq::taxa_names(physeq_species) %>% 
+  stringr::str_split_fixed(stringr::fixed("|"), n = 7)
+dimnames(mat_taxa) <- list(
+  phyloseq::taxa_names(physeq_species),
+  paste0("Rank", 1:7)
+)
+physeq_II <- phyloseq::phyloseq(
+  phyloseq::otu_table(mat_abd, taxa_are_rows = TRUE),
+  phyloseq::sample_data(df_metadata),
+  phyloseq::tax_table(mat_taxa)
+) %>% 
+  smar::prune_taxaSamples()
+
+physeq_IBD <- physeq_II %>% 
+  phyloseq::subset_samples(diagnosis %in% c("CD", "UC")) %>% 
+  smar::prune_taxaSamples()
+
+save(physeq_II, file = "data/physeqs/HMPII_all.RData")
+save(physeq_IBD, file = "data/physeqs/HMPII_IBD.RData")
+```
+
+```{r subsetting}
+physeq_stool_bl <- physeq_stool %>% 
+  phyloseq::subset_samples(VISNO == 1 & read_depth > 3000) %>% 
+  {smar::prune_taxaSamples(
+    .,
+    flist_taxa = smar:::kOverA2(k = 3, 
+                                A = 0))}
+
+physeq_vaginal_bl <- physeq_vaginal %>% 
+  phyloseq::subset_samples(VISNO == 1 & read_depth > 3000) %>% 
+  {smar::prune_taxaSamples(
+    .,
+    flist_taxa = smar:::kOverA2(k = 3, 
+                                A = 0))}
+
+samples_IBD_bl <- physeq_IBD %>% 
+  smar::sample_data2() %>% 
+  dplyr::group_by(`Participant.ID`) %>% 
+  dplyr::arrange(week_num) %>% 
+  dplyr::slice(1) %>% 
+  {.$External.ID}
+physeq_IBD_bl <- physeq_IBD %>% 
+  phyloseq::subset_samples(External.ID %in% samples_IBD_bl &
+                           read_depth > 3000) %>% 
+  {smar::prune_taxaSamples(
+    .,
+    flist_taxa = smar:::kOverA2(k = 3, 
+                                A = 0))}
+
+save(physeq_stool_bl, file = "data/physeqs/stool.RData")
+save(physeq_vaginal_bl, file = "data/physeqs/vaginal.RData")
+save(physeq_IBD_bl, file = "data/physeqs/IBD.RData")
+```
