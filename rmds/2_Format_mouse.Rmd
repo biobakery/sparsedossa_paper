@@ -1,0 +1,68 @@
+---
+title: "Format mouse data"
+author: "Siyuan Ma"
+date: "10/2/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r source functions, include=FALSE}
+library(magrittr)
+library(ggplot2)
+```
+
+```{r load & format data}
+physeq_mouse <- phyloseq::import_biom("data/mouse/16SPOOL17_otu_table.biom")
+df_metadata <- readxl::read_xlsx("data/mouse/16SPOOL17_Metadata_for_Huttenhower_090220.xlsx") %>% 
+  dplyr::mutate(diet_overall = `Current diet` %>% 
+                  dplyr::recode("Chow" = "Chow",
+                                "MRF" = "Meat",
+                                "MCR" = "Meat",
+                                "MCF" = "Meat",
+                                "TCR" = "Tuber",
+                                "TRF" = "Tuber",
+                                "TCF" = "Tuber")) %>% 
+  data.frame(check.names = TRUE) %>% 
+  tibble::column_to_rownames("Sample.ID.as.listed.in.OTU.table")
+phyloseq::sample_data(physeq_mouse) <- df_metadata
+
+physeq_mouse <- physeq_mouse %>% 
+  phyloseq::subset_samples(Day.as.listed.in.MS.SI %in% c(0, 1, 5))
+```
+
+```{r subset data}
+tb_filter <- tibble::tibble(
+  day = c(0, 1, 1, 5, 5),
+  diet = c("Chow", "Meat", "Tuber", "Meat", "Tuber")
+)
+
+l_physeq <- list()
+for(i_filter in seq_len(nrow(tb_filter))) {
+  i_day <- tb_filter$day[i_filter]
+  i_diet <- tb_filter$diet[i_filter]
+  l_physeq[[i_filter]] <- physeq_mouse %>% 
+    phyloseq::subset_samples(Day.as.listed.in.MS.SI == i_day &
+                               diet_overall == i_diet)
+}
+
+l_features <- l_physeq %>% 
+  purrr::map(~ .x %>% 
+               phyloseq::filter_taxa(
+                 genefilter::kOverA(k = 3, A = 1) %>% 
+                   genefilter::filterfun(),
+                 prune = TRUE
+               ) %>% 
+               phyloseq::taxa_names())
+
+features_common <- l_features %>% 
+  purrr::reduce(intersect)
+
+physeq_mouse_filtered <- physeq_mouse %>% 
+  phyloseq::prune_taxa(features_common, .)
+
+save(physeq_mouse_filtered, file = "data/mouse/physeq_mouse.RData")
+```
