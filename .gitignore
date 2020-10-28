@@ -2,9 +2,8 @@
 .Rhistory
 .RData
 .Ruserdata
-data/
 attic/
-figures/
+results/
 htmls/
 .DS_Store
 tables/
