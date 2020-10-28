@@ -6,12 +6,10 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
-```{r setup, include=FALSE}
-rm(list = ls())
-knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_knit$set(root.dir = "/n/janson_lab/lab/sma/sparsedossa_paper/")
+knitr::opts_chunk$set(echo=FALSE)
+library(magrittr)
+library(ggplot2)
 ```
 
 ```{r source functions, include=FALSE}
@@ -22,17 +20,37 @@ dir_output <- "results/Evaluate/"
 dir.create(dir_output, recursive = TRUE, showWarnings = FALSE)
 ```
 
-```{r job array}
-tb_job <- tidyr::expand_grid(
-  dataset = c("vaginal",
-              "stool",
-              "IBD"),
-  method = c("SparseDOSSA2",
-             "metaSPARSim",
-             "DMM"),
-  R = seq(1, 100)
-) %>% 
-  dplyr::mutate(i_job = seq_len(dplyr::n()))
+```{r setup2}
+# Registry
+# batchtools::makeRegistry(file.dir = "r_batchtools_reg/Evaluation",
+#                          package = "magrittr")
+batchtools::loadRegistry(file.dir = "r_batchtools_reg/Evaluation", 
+                         writeable = TRUE)
+batchtools::clearRegistry()
+
+# Grid parameters
+ncpus <- 1
+partition <- "janson,janson_cascade,shared"
+walltime <- 3600
+
+dir_output <- "/n/janson_lab/lab/sma/sparsedossa_paper/results/Evaluate/"
+dir.create(dir_output, recursive = TRUE)
+```
+
+```{r job grid}
+load("results/Simulation/tb_job.RData")
+tb_job <- tb_job %>% 
+  dplyr::rename(i_job_sim = i_job) %>% 
+  dplyr::select(dataset, K_split, training, method, i_job_sim, R)
+tb_job <- tb_job %>% 
+  dplyr::group_by(dataset, K_split) %>% 
+  dplyr::slice(1) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(method = "Original",
+                i_job_sim = NA) %>% 
+  rbind(tb_job) %>% 
+  dplyr::mutate(i_job = seq(1, dplyr::n()))
+save(tb_job, file = paste0(dir_output, "tb_job.RData"))
 ```
 
 ```{r one job}
@@ -40,238 +58,42 @@ one_job <- function(i_job) {
   i_tb_job <- tb_job[i_job, ]
   
   load(paste0("data/physeqs/", i_tb_job$dataset, ".RData"))
-  load(paste0("results/Simulation/", i_job, ".RData"))
   
   # Evaluate R2
   original_data <- get(paste0("physeq_", i_tb_job$dataset, "_bl")) %>% 
     smar::otu_table2()
-  if(i_tb_job$method == "SparseDOSSA2")
-  {
-    load(paste0("results/Simulation/SparseDOSSA2_", i_job, ".RData"))
-    sim_data <- sim_SparseDOSSA2$simulated_matrices$rel
+  sim_data_fill <- original_data[, i_tb_job$training[[1]]]
+  if(i_tb_job$method != "Original") {
+    load(paste0("results/Simulation/", i_tb_job$i_job_sim, ".RData"))
+    sim_data_fill <- original_data[, i_tb_job$training[[1]]]
+    colnames(sim_data_fill) <- paste0("Sample", seq_len(ncol(sim_data_fill)))
+    sim_data_fill[rownames(sim_data), ] <- sim_data
   }
-  dataset_combined <- cbind(original_data, sim_data) %>% 
+  original_data <- original_data[, setdiff(seq_len(ncol(original_data)),
+                                           i_tb_job$training[[1]])]
+  
+  dataset_combined <- cbind(original_data, sim_data_fill) %>% 
     apply(2, function(x) x / sum(x))
   D <- vegan::vegdist(t(dataset_combined), method = "bray")
   R2 <- vegan::adonis(D ~ sample,
-                      data = data.frame(sample = rep(c("original",
-                                                       "simulation"),
-                                                     each = ncol(original_data))),
+                      data = data.frame(sample = c(rep("original", ncol(original_data)),
+                                                   rep("simulation", ncol(sim_data_fill)))),
                       permutations = 2)$aov.tab$R2[1]
   return(R2)
 }
 ```
 
-```{r calculate R2 and KS test statistics}
-future::plan(future::multisession())
-R2s <- future.apply::future_vapply(
-  tb_job$i_job,
-  one_job,
-  0.0)
-
-tb_results_R2 <- tb_job %>% 
-  dplyr::mutate(R2 = R2s)
-save(tb_results_R2, 
-     file = paste0(dir_output, "results_R2.RData"))
-
-tb_results_ks <- 
-  tb_job %>% 
-  dplyr::group_by(dataset, method) %>% 
-  dplyr::summarise(tb_results_ks = {
-    load(paste0("data/physeqs/", dataset[1], ".RData"))
-    original_data <- get(paste0("physeq_", dataset[1], "_bl")) %>% 
-      smar::otu_table2()  
-    sim_data <- i_job %>% 
-      purrr::map( ~ {
-        load(paste0("results/Simulation/", .x, ".RData")) 
-        sim_data
-      }) %>% 
-      purrr::reduce(cbind)
-    ks <- rownames(original_data) %>% 
-      purrr::map_dbl(~ {
-        ks.test(original_data[.x, ],
-                sim_data[.x, ])$statistic
-      })
-    tb_results_ks <- tibble::tibble(
-      dataset = dataset[1],
-      method = method[1],
-      feature = rownames(original_data),
-      ks = ks
-    )
-    list(tb_results_ks)
-  })
-
-tb_results_ks <- tb_results_ks$tb_results_ks %>% 
-  purrr::reduce(rbind)
-save(tb_results_ks, 
-     file = paste0(dir_output, "results_ks.RData"))
-
-tb_job %>% 
-  dplyr::mutate(R2 = R2s) %>% 
-  dplyr::mutate(dataset = dataset %>% 
-                  dplyr::recode("stool" = "Stool",
-                                "vaginal" = "Vaginal") %>% 
-                  factor(levels = c("Stool", "Vaginal", "IBD"))) %>% 
-  ggplot(aes(x = method, y = R2)) +
-  geom_boxplot() +
-  facet_grid(dataset~., scales = "free_y") +
-  ggtitle("Simulation performance comparison") +
-  xlab("Fitted model") +
-  ylab("R2 (simulated vs. real-world)") +
-  theme_bw()
-
-i_job <- 301
-i_tb_job <- tb_job[i_job, ]
-  
-load(paste0("data/physeqs/", i_tb_job$dataset, ".RData"))
-load(paste0("results/Simulation/", i_job, ".RData"))
-
-  
-original_data <- get(paste0("physeq_", i_tb_job$dataset, "_bl")) %>% 
-  smar::otu_table2()  
-
-load("results/fitted/SparseDOSSA2_vaginal.RData")
-which(fit_SparseDOSSA2$EM_fit$fit$mu > -2)
-
-tb_marginal <- tibble::tibble(
-  `Real world` = original_data %>% apply(2, function(x) x / sum(x)) %>% {.[40, ]},
-  SparseDOSSA2 = sim_data %>% apply(2, function(x) x / sum(x)) %>% {.[40, ]})
-
-i_job <- 501
-load(paste0("results/Simulation/", i_job, ".RData"))
-tb_marginal$DMM <- sim_data %>% 
-  apply(2, function(x) x / sum(x)) %>% 
-  {.[40, ]} %>% 
-  {
-    x = .
-    x[x < 1e-8] = 0
-    x
-  }
-
-tb_marginal %>% 
-  tidyr::pivot_longer(cols = c("Real world", "SparseDOSSA2", "DMM"),
-                      values_to = "RA",
-                      names_to = "Data") %>% 
-  dplyr::mutate(Data = factor(Data, levels = c("Real world", "DMM", "SparseDOSSA2"))) %>% 
-  ggplot(aes(x = log10(RA + 1e-10))) +
-  geom_histogram() +
-  facet_grid(.~Data) +
-  theme_bw() +
-  xlab("log10(Relative abundance + 1e-10)") +
-  ggtitle("Marginal distribution of Lactobacillus crispatus")
+```{r submit jobs}
+tb_ids <- batchtools::batchMap(one_job,
+                               i_job = tb_job$i_job)
+batchtools::batchExport(mget(ls()))
+batchtools::submitJobs(ids = tb_ids$job.id,
+                       resources =  list(ncpus = ncpus, 
+                                         partition = partition, 
+                                         walltime = walltime))
 ```
 
-```{r KS distance}
-tb_results_ks <- 
-  tb_job %>% 
-  dplyr::group_by(dataset, method) %>% 
-  dplyr::summarise(tb_results_ks = {
-    load(paste0("data/physeqs/", dataset[1], ".RData"))
-    original_data <- get(paste0("physeq_", dataset[1], "_bl")) %>% 
-      smar::otu_table2() %>% 
-      apply(2, function(x) x / sum(x))
-    sim_data <- i_job %>% 
-      purrr::map( ~ {
-        load(paste0("results/Simulation/", .x, ".RData")) 
-        sim_data
-      }) %>% 
-      purrr::reduce(cbind) %>% 
-      apply(2, function(x) x / sum(x))
-    ks <- rownames(original_data) %>% 
-      purrr::map_dbl(~ {
-        ks.test(original_data[.x, ],
-                sim_data[.x, ])$statistic
-      })
-    tb_results_ks <- tibble::tibble(
-      dataset = dataset[1],
-      method = method[1],
-      feature = rownames(original_data),
-      ks = ks
-    )
-    list(tb_results_ks)
-  })
-
-tb_results_ks <- tb_results_ks$tb_results_ks %>% 
-  purrr::reduce(rbind)
-
-feature <- tb_results_ks %>% 
-  dplyr::filter(dataset == "stool", method == "SparseDOSSA2") %>% 
-  dplyr::arrange(-ks) %>% 
-  dplyr::slice(6) %>% 
-  extract2("feature")
-
-load(paste0("data/physeqs/", "stool", ".RData"))
-original_data <- physeq_stool_bl %>% 
-  smar::otu_table2()  %>% 
-  apply(2, function(x) x / sum(x))
-sim_data_SparseDOSSA2 <- tb_job %>%
-  dplyr::filter(method == "SparseDOSSA2", dataset == "stool") %>% 
-  extract2("i_job") %>% 
-  purrr::map( ~ {
-    load(paste0("results/Simulation/", .x, ".RData")) 
-    sim_data
-  }) %>% 
-  purrr::reduce(cbind) %>% 
-  apply(2, function(x) x / sum(x))
-
-sim_data_metaSPARSim <- tb_job %>%
-  dplyr::filter(method == "metaSPARSim", dataset == "stool") %>% 
-  extract2("i_job") %>% 
-  purrr::map( ~ {
-    load(paste0("results/Simulation/", .x, ".RData")) 
-    sim_data
-  }) %>% 
-  purrr::reduce(cbind) %>% 
-  apply(2, function(x) x / sum(x))
-
-rbind(tibble::tibble(data = "Original",
-                     y = original_data[feature, ]),
-      tibble::tibble(data = "SparseDOSSA2",
-                     y = sim_data_SparseDOSSA2[feature, ]),
-      tibble::tibble(data = "metaSPARSim",
-                     y = sim_data_metaSPARSim[feature, ])) %>% 
-  dplyr::mutate(logy = log10(y + 1e-10)) %>% 
-  ggplot(aes(x = logy)) +
-  geom_histogram() +
-  facet_grid(data~., scales = "free_y")
-  stat_ecdf(aes(color = data),
-             geom = "step")
-
-tb_results_ks %>% 
-  dplyr::filter(dataset == "stool",
-                method != "DMM") %>% 
-  tidyr::pivot_wider(id_cols = c(feature, dataset), names_from = method, values_from = ks) %>% 
-  dplyr::arrange(-SparseDOSSA2) %>% 
-  dplyr::slice(1:5)
-  ggplot(aes(x = SparseDOSSA2, y = metaSPARSim)) +
-  geom_point() +
-  geom_abline(intercept = 0, slope = 1)
-```
-
-```{r what if unifrac}
-tree_raw <- phyloseq::read_tree("~/Downloads/metaphlan2_selected.tree.reroot.nwk.bz2")
-mat_taxa <- tree_raw$tip.label %>% 
-  purrr::map(~ .x %>% strsplit("\\|") %>% {.[[1]]}) %>% 
-  purrr::reduce(rbind)
-colnames(mat_taxa) <- paste0("Rank", seq(1, 8))
-rownames(mat_taxa) <- tree_raw$tip.label
-otu_pseudo <- matrix(0, nrow = nrow(mat_taxa), ncol = 1)
-dimnames(otu_pseudo) <- list(rownames(mat_taxa), "Sample")
-physeq_tree_raw <- phyloseq::phyloseq(phyloseq::otu_table(otu_pseudo, 
-                                                          taxa_are_rows = TRUE),
-                                      phyloseq::tax_table(mat_taxa),
-                                      tree_raw)
-load("data/physeqs/stool.RData")
-load("data/physeqs/IBD.RData")
-load("data/physeqs/vaginal.RData")
-
-taxa_names_data <- 
-  list(physeq_stool_bl, physeq_vaginal_bl, physeq_IBD_bl) %>% 
-  purrr::map(phyloseq::taxa_names) %>% 
-  purrr::reduce(c) %>% 
-  unique()
-all(taxa_names_data %in% (mat_taxa[, -8] %>% apply(1, paste, collapse = "|")))
-
-physeq_tree_species <- physeq_tree_raw %>% 
-  phyloseq::tax_glom("Rank7")
+```{r gather results}
+R2 <- sapply(tb_job$i_job, batchtools::loadResult)
+save(R2, file = paste0(dir_output, "R2.RData"))
 ```
