@@ -5,6 +5,7 @@
 attic/
 results/
 htmls/
+*.html
 .DS_Store
 tables/
 *.Rproj

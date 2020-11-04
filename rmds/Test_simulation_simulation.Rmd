@@ -1,0 +1,122 @@
+---
+title: "Simulate datasets"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/n/janson_lab/lab/sma/sparsedossa_paper/")
+knitr::opts_chunk$set(echo=FALSE)
+library(magrittr)
+library(ggplot2)
+```
+
+```{r setup2}
+# Registry
+# batchtools::makeRegistry(file.dir = "r_batchtools_reg/tmp/Test_simulation/",
+#                          package = "magrittr")
+batchtools::loadRegistry(file.dir = "r_batchtools_reg/tmp/Test_simulation/", 
+                         writeable = TRUE)
+batchtools::clearRegistry()
+
+# Grid parameters
+ncpus <- 1
+partition <- "janson,janson_cascade,shared"
+walltime <- 5 * 3600
+
+dir_output <- "/n/janson_lab/lab/sma/sparsedossa_paper/results/tmp/Test_Simulation_Simulation/"
+dir.create(dir_output, recursive = TRUE)
+```
+
+```{r setup simulation params}
+load("/n/janson_lab/lab/sma/sparsedossa_paper/results/tmp/Test_Simulation/tb_job.RData")
+tb_job <- tb_job %>% 
+  dplyr::mutate(i_job_fit = i_job) %>% 
+  tidyr::expand_grid(R = seq(1, 20)) %>% 
+  dplyr::mutate(i_job = seq_len(dplyr::n()))
+save(tb_job, file = paste0(dir_output, "tb_job.RData"))
+```
+
+```{r define one job}
+one_job <- function(i_job) {
+  i_tb_job <- tb_job[i_job, ]
+  
+  set.seed(i_job)
+  i_tb_job <- tb_job[tb_job$i_job == i_job, ]
+  
+  load(paste0("results/tmp/Test_Simulation/fit_", i_tb_job$i_job_fit, ".RData"))
+  load(paste0("data/physeqs/", i_tb_job$dataset, ".RData"))
+  n_sample <- length(i_tb_job$training[[1]])
+  lib_size <- get(paste0("physeq_", i_tb_job$dataset, "_bl")) %>% 
+    smar::sample_data2() %>% {.$read_depth[i_tb_job$training[[1]]]}
+    
+  if(i_tb_job$method == "SparseDOSSA2") {
+    sim_SparseDOSSA2 <- SparseDOSSA2::SparseDOSSA2(template = fit,
+                                                   n_sample = n_sample,
+                                                   new_feature = FALSE, 
+                                                   spike_metadata = "none")
+    save(sim_SparseDOSSA2, 
+         file = paste0(dir_output, "SparseDOSSA2_", i_job, ".RData"))
+    sim_data <- vapply(
+      seq_len(n_sample),
+      function(i_sample) {
+        rmultinom(
+          n = 1,
+          size = lib_size[i_sample],
+          prob = sim_SparseDOSSA2$simulated_matrices$rel[, i_sample])
+      },
+      rep(0, nrow(sim_SparseDOSSA2$simulated_matrices$rel)))
+    taxa_names <- fit$EM_fit$pi0 %>% names()
+  }
+    
+  if(i_tb_job$method == "metaSPARSim") {
+    sim_metaSPARSim <- metaSPARSim::metaSPARSim(fit)
+    save(sim_metaSPARSim, file = paste0(dir_output, "metaSPARSim_", i_job, ".RData"))
+    sim_data <- sim_metaSPARSim$counts
+    
+    taxa_names <- fit$group$intensity %>% names()
+  }
+  # 
+  # if(i_tb_job$method == "DMM") {
+  #   sim_DMM <- MCMCpack::rdirichlet(n = n_sample,
+  #                                   alpha = fit_DMM$gamma) %>% 
+  #   t()
+  #   save(sim_DMM, file = paste0(dir_output, "DMM_", i_job, ".RData"))
+  #   sim_data <- vapply(seq_len(n_sample),
+  #                      function(i_sample) {
+  #                        rmultinom(n = 1,
+  #                                  size = lib_size[i_sample],
+  #                                  prob = sim_DMM[, i_sample])
+  #                      },
+  #                      rep(0, nrow(sim_DMM)))
+  # }
+  
+  dimnames(sim_data) <- list(taxa_names,
+                             paste0("Sample", seq_len(n_sample)))
+  
+  save(sim_data, file = paste0(dir_output, i_job, ".RData"))
+}
+```
+
+```{r submit jobs}
+tb_ids <- batchtools::batchMap(one_job,
+                               i_job = tb_job$i_job)
+batchtools::batchExport(mget(ls()))
+batchtools::submitJobs(ids = tb_ids$job.id,
+                       resources =  list(ncpus = ncpus, 
+                                         partition = partition, 
+                                         walltime = walltime))
+```
+
+```{r temp fix for metaSparsim sim}
+# for(i_job in tb_job$i_job[tb_job$method == "metaSPARSim"]) {
+#   load(paste0(dir_output, "metaSPARSim_", i_job, ".RData"))
+#   
+#   sim_data <- sim_metaSPARSim$counts
+#   
+#   load(paste0("results/tmp/Test_Simulation/fit_", tb_job$i_job_fit[tb_job$i_job == i_job], ".RData"))  
+#   taxa_names <- sim_metaSPARSim$params$group$intensity %>% names()
+#   
+#   rownames(sim_data) <- taxa_names
+#   save(sim_data, file = paste0(dir_output, i_job, ".RData"))
+# }
+```
