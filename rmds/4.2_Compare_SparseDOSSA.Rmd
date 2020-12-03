@@ -1,0 +1,638 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/n/janson_lab/lab/sma/sparsedossa_paper/")
+knitr::opts_chunk$set(echo=FALSE)
+library(magrittr)
+library(ggplot2)
+```
+
+# SparseDOSSA 2 results
+
+```{r SparseDOSSA 2 results}
+# generate results
+load("results/Benchmarking/tb_job.RData")
+tb_results <- tb_job %>% 
+  dplyr::filter(n == 200) %>% 
+  dplyr::filter(method %in% c("DESeq2", "ANCOM", "MaAsLin2")) %>% 
+  dplyr::group_by(i_job) %>% 
+  dplyr::mutate(fit = {
+    load(paste0("results/Benchmarking/fit_", i_job, ".RData"))
+    list(fit)
+  }) %>% 
+  dplyr::ungroup()
+tb_summary <- tb_results %>% 
+  dplyr::mutate(effect = factor(effect, levels = c(0, 0.5, 1, 2)),
+                Method = factor(method, levels = c("DESeq2", "edgeR", "limmaVOOM", "ANCOM", "MaAsLin2"))) %>% 
+  dplyr::group_by(i_job) %>% 
+  dplyr::mutate(
+    n_TP = 
+      sum(fit[[1]]$qval < 0.05 & stringr::str_detect(fit[[1]]$feature, "TP"), na.rm = TRUE),
+    n_FP = 
+      sum(fit[[1]]$qval < 0.05 & !stringr::str_detect(fit[[1]]$feature, "TP"), na.rm = TRUE),
+    n_P = 
+      sum(fit[[1]]$qval < 0.05, na.rm = TRUE)
+    ) %>% 
+  dplyr::group_by(effect, n, Method, direction, spike_property) %>%
+  dplyr::summarise(
+    Power = mean(n_TP / 16),
+    Power_sd = sd(n_TP / 16) / sqrt(20),
+    FDR = mean(n_FP / (n_P + 1e-10)),
+    FDR_sd = sd(n_FP / (n_P + 1e-10)) / sqrt(20)
+    # Sensitivity = mean(n_TP / length(features_toSpike))
+    # Sensitivity_sd = sd(n_TP / length(features_toSpike)) / sqrt(10)
+  ) %>%
+  dplyr::ungroup()
+p_power1 <- tb_summary %>% 
+  dplyr::filter(direction == "opposite",
+                spike_property == "both") %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = Power,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = Power - Power_sd,
+                    ymax = Power + Power_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 4), labels = c("0", "0.5", "1", "2")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  ggtitle("Balanced spikes")
+p_FDR1 <- tb_summary %>% 
+  dplyr::filter(n == 200) %>% 
+  dplyr::filter(Method %in% c("DESeq2", "ANCOM", "MaAsLin2")) %>% 
+  dplyr::filter(direction == "opposite",
+                spike_property == "both") %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = FDR,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = FDR - FDR_sd,
+                    ymax = FDR + FDR_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 4), labels = c("0", "0.5", "1", "2")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  ggtitle("")
+p_power2 <- tb_summary %>% 
+  dplyr::filter(n == 200) %>% 
+  dplyr::filter(Method %in% c("DESeq2", "ANCOM", "MaAsLin2")) %>% 
+  dplyr::filter(direction == "same",
+                spike_property == "both") %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = Power,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = Power - Power_sd,
+                    ymax = Power + Power_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 4), labels = c("0", "0.5", "1", "2")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  ggtitle("Same direction spikes")
+p_FDR2 <- tb_summary %>% 
+  dplyr::filter(n == 200) %>% 
+  dplyr::filter(Method %in% c("DESeq2", "ANCOM", "MaAsLin2")) %>% 
+  dplyr::filter(direction == "opposite",
+                spike_property == "both") %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = FDR,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = FDR - FDR_sd,
+                    ymax = FDR + FDR_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 4), labels = c("0", "0.5", "1", "2")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  ggtitle("")
+p_new <- cowplot::plot_grid(p_power1, p_FDR1, p_power2, p_FDR2, nrow = 2)
+ggsave(filename = "results/new_results.pdf", 
+       p_new, width = 8, height = 6)
+
+load("attic/results/Benchmarking/11_19_2020/tb_job.RData")
+tb_results <- tb_job %>% 
+  dplyr::filter(n == 200) %>% 
+  dplyr::filter(method %in% c("DESeq2", "ANCOM", "MaAsLin2")) %>% 
+  dplyr::group_by(i_job) %>% 
+  dplyr::mutate(fit = {
+    load(paste0("attic/results/Benchmarking/11_19_2020/fit_", i_job, ".RData"))
+    list(fit)
+  }) %>% 
+  dplyr::ungroup()
+tb_summary <- tb_results %>% 
+  dplyr::mutate(effect = factor(effect, levels = c(0, 0.5, 1, 2)),
+                Method = factor(method, levels = c("DESeq2", "edgeR", "limmaVOOM", "ANCOM", "MaAsLin2"))) %>% 
+  dplyr::group_by(i_job) %>% 
+  dplyr::mutate(
+    n_TP = 
+      sum(fit[[1]]$qval < 0.05 & stringr::str_detect(fit[[1]]$feature, "TP"), na.rm = TRUE),
+    n_FP = 
+      sum(fit[[1]]$qval < 0.05 & !stringr::str_detect(fit[[1]]$feature, "TP"), na.rm = TRUE),
+    n_P = 
+      sum(fit[[1]]$qval < 0.05, na.rm = TRUE)
+    ) %>% 
+  dplyr::group_by(effect, n, Method, direction, spike_property) %>%
+  dplyr::summarise(
+    Power = mean(n_TP / 16),
+    Power_sd = sd(n_TP / 16) / sqrt(20),
+    FDR = mean(n_FP / (n_P + 1e-10)),
+    FDR_sd = sd(n_FP / (n_P + 1e-10)) / sqrt(20)
+    # Sensitivity = mean(n_TP / length(features_toSpike))
+    # Sensitivity_sd = sd(n_TP / length(features_toSpike)) / sqrt(10)
+  ) %>%
+  dplyr::ungroup()
+p_power1 <- tb_summary %>% 
+  dplyr::filter(n == 200) %>% 
+  dplyr::filter(Method %in% c("DESeq2", "ANCOM", "MaAsLin2")) %>% 
+  dplyr::filter(direction == "opposite",
+                spike_property == "both") %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = Power,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = Power - Power_sd,
+                    ymax = Power + Power_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 4), labels = c("0", "0.5", "1", "2")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  ggtitle("Balanced spikes")
+p_FDR1 <- tb_summary %>% 
+  dplyr::filter(n == 200) %>% 
+  dplyr::filter(Method %in% c("DESeq2", "ANCOM", "MaAsLin2")) %>% 
+  dplyr::filter(direction == "opposite",
+                spike_property == "both") %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = FDR,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = FDR - FDR_sd,
+                    ymax = FDR + FDR_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 4), labels = c("0", "0.5", "1", "2")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  ggtitle("")
+p_power2 <- tb_summary %>% 
+  dplyr::filter(n == 200) %>% 
+  dplyr::filter(Method %in% c("DESeq2", "ANCOM", "MaAsLin2")) %>% 
+  dplyr::filter(direction == "same",
+                spike_property == "both") %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = Power,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = Power - Power_sd,
+                    ymax = Power + Power_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 4), labels = c("0", "0.5", "1", "2")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  ggtitle("Same direction spikes")
+p_FDR2 <- tb_summary %>% 
+  dplyr::filter(n == 200) %>% 
+  dplyr::filter(Method %in% c("DESeq2", "ANCOM", "MaAsLin2")) %>% 
+  dplyr::filter(direction == "opposite",
+                spike_property == "both") %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = FDR,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = FDR - FDR_sd,
+                    ymax = FDR + FDR_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 4), labels = c("0", "0.5", "1", "2")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  ggtitle("")
+p_old <- cowplot::plot_grid(p_power1, p_FDR1, p_power2, p_FDR2, nrow = 2)
+ggsave(filename = "results/new_results.pdf", 
+       p_new, width = 8, height = 6)
+# load("results/Benchmarking/Simulation/features_toSpike.RData")
+
+
+tb_results %>% 
+  dplyr::filter(effect == 0.5,
+                n == 50,
+                method == "DESeq2",
+                direction == "same",
+                spike_property == "both",
+                R == 1) %>% 
+  {extract2(., "fit")[[1]]} %>% 
+  View()
+
+
+tb_summary %>% 
+  dplyr::filter(direction == "opposite",
+                spike_property == "abundance") %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = Power,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = Power - Power_sd,
+                    ymax = Power + Power_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 5), labels = c("0", "0.5", "1", "2", "4")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  facet_grid(~n) +
+  ggtitle("Power")
+
+
+tb_summary %>% 
+  dplyr::filter(direction == "same") %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = FDR,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = FDR - FDR_sd,
+                    ymax = FDR + FDR_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 5), labels = c("0", "0.5", "1", "2", "4")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  facet_grid(~n) +
+  ggtitle("FDR")
+
+
+p_FDR <- tb_summary %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = FDR,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = FDR - FDR_sd,
+                    ymax = FDR + FDR_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 5), labels = c("0", "0.5", "1", "2", "4")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  facet_grid(~n) +
+  ggtitle("FDR")
+
+tb_zero <- tb_job %>%
+  dplyr::filter(!duplicated(i_job_sim)) %>% 
+  dplyr::group_by(i_job_sim) %>% 
+  dplyr::mutate(p_zero = {
+    load(paste0("results/Benchmarking/Simulation/", i_job_sim[1], "_count.RData"))
+    mean(mat_count_simulated == 0)
+  }) %>% 
+  dplyr::ungroup()
+
+p_zero <- tb_zero %>% 
+  ggplot(aes(x = factor(effect, levels = c(0, 0.5, 1, 2, 4)), y = p_zero)) + 
+  geom_boxplot() +
+  facet_grid(~n) +
+  ggtitle("Perc zeros")
+
+tb_plot <- seq(1, 5) %>% 
+  purrr::map_dfr(
+    function(i_R) {
+      i_tb_results <- tb_results %>% 
+        dplyr::filter(effect == 1, R == i_R, n == 200)
+      
+      load("results/fitted/SparseDOSSA2_stool.RData")
+      features_nonSpike <- setdiff(names(fit_SparseDOSSA2$EM_fit$fit$pi0), features_toSpike)
+      tb_truth <- rbind(tibble::tibble(feature = features_toSpike,
+                                       effect = rep(c(1, -1), 16),
+                                       method = "Truth",
+                                       q = 0),
+                        tibble::tibble(feature = features_nonSpike,
+                                       effect = 0,
+                                       method = "Truth",
+                                       q = 1))
+      
+      tb_methods <- c("DESeq2", "edgeR", "limmaVOOM", "MaAsLin2") %>% 
+        purrr::map_dfr(
+          function(i_method) {
+            i_tb_results %>% 
+              dplyr::filter(method == i_method) %>% 
+              {extract2(., "fit")[[1]]} %>% 
+              dplyr::rename(effect = coef,
+                            q = qval) %>% 
+              dplyr::mutate(method = i_method) %>% 
+              dplyr::select(feature, effect, method, q)
+          }
+        )
+      
+      rbind(tb_truth, tb_methods) %>% 
+        dplyr::mutate(feature = factor(feature, levels = c(features_toSpike[seq(1, 31, by = 2)],
+                                                           features_toSpike[seq(2, 32, by = 2)],
+                                                           features_nonSpike)),
+                      method = method %>% forcats::as_factor()) %>% 
+        dplyr::mutate(R = i_R)
+    })
+
+p_sanity <- tb_plot %>% 
+  ggplot(aes(x = feature, 
+             y = effect,
+             alpha = q < 0.05,
+             color = effect > 0)) +
+  geom_point() +
+  scale_alpha_manual(values = c("TRUE" = 1, "FALSE" = 0.1)) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "blue")) +
+  facet_grid(method~R, scales = "free_y") +
+  theme(axis.text.x = element_blank())
+
+print(p_zero)
+print(p_power)
+print(p_FDR)
+print(p_sanity)
+```
+
+# SparseDOSSA 1
+
+```{r SparseDOSSA 1 results}
+load("results/Benchmarking_comparison/tb_job.RData")
+
+tb_results_old <- tb_job %>% 
+  dplyr::group_by(i_job) %>% 
+  dplyr::mutate(fit = {
+    load(paste0("results/Benchmarking_comparison/fit_", i_job, ".RData"))
+    list(fit)
+  }) %>% 
+  dplyr::ungroup()
+
+tb_summary_old <- tb_results_old %>% 
+  dplyr::mutate(effect = factor(effect, levels = c(0, 0.5, 1, 2, 4)),
+                n = factor(n, levels = c(50, 100, 200, 400, 800)),
+                Method = factor(method, levels = c("DESeq2", "edgeR", "limmaVOOM", "ANCOM", "MaAsLin2"))) %>% 
+  dplyr::group_by(i_job) %>% 
+  dplyr::mutate(
+    n_TP = 
+      sum(fit[[1]]$qval < 0.05 & stringr::str_detect(fit[[1]]$feature, "TP"), na.rm = TRUE),
+    n_FP = 
+      sum(fit[[1]]$qval < 0.05 & !stringr::str_detect(fit[[1]]$feature, "TP"), na.rm = TRUE),
+    n_P = 
+      sum(fit[[1]]$qval < 0.05, na.rm = TRUE)
+    ) %>% 
+  dplyr::group_by(effect, n, Method) %>%
+  dplyr::summarise(
+    Power = mean(n_TP / 16),
+    Power_sd = sd(n_TP / 16) / sqrt(20),
+    FDR = mean(n_FP / (n_P + 1e-10)),
+    FDR_sd = sd(n_FP / (n_P + 1e-10)) / sqrt(20)
+    # Sensitivity = mean(n_TP / length(features_toSpike))
+    # Sensitivity_sd = sd(n_TP / length(features_toSpike)) / sqrt(10)
+  ) %>%
+  dplyr::ungroup()
+
+p_power <- tb_summary_old %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = Power,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = Power - Power_sd,
+                    ymax = Power + Power_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 5), labels = c("0", "0.5", "1", "2", "4")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  facet_grid(~n) +
+  ggtitle("Power")
+
+tb_summary_old %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = FDR,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = FDR - FDR_sd,
+                    ymax = FDR + FDR_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 5), labels = c("0", "0.5", "1", "2", "4")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  facet_grid(~n) +
+  ggtitle("Power")
+
+
+p_FDR <- tb_summary %>% 
+  ggplot(aes(x = as.numeric(effect),
+             y = FDR,
+             color = Method)) +
+  geom_point(position = position_dodge(width = 0.25)) +
+  geom_errorbar(aes(ymin = FDR - FDR_sd,
+                    ymax = FDR + FDR_sd),
+                width = 0.25,
+                position = position_dodge(width = 0.25)) +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(1, 5), labels = c("0", "0.5", "1", "2", "4")) +
+  theme(legend.position = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.background = element_blank(),
+        axis.title.x = element_blank()) +
+  facet_grid(~n) +
+  ggtitle("FDR")
+
+tb_zero <- tb_job %>%
+  dplyr::filter(!duplicated(i_job_sim)) %>% 
+  dplyr::group_by(i_job_sim) %>% 
+  dplyr::mutate(p_zero = {
+    load(paste0("results/Benchmarking_comparison/Simulation/", i_job_sim[1], "_count.RData"))
+    mean(mat_count_simulated == 0)
+  }) %>% 
+  dplyr::ungroup()
+
+p_zero <- tb_zero %>% 
+  ggplot(aes(x = factor(effect, levels = c(0, 0.5, 1, 2, 4)), y = p_zero)) + 
+  geom_boxplot() +
+  facet_grid(~n) +
+  ggtitle("Perc zeros")
+
+tb_plot <- seq(1, 5) %>% 
+  purrr::map_dfr(
+    function(i_R) {
+      i_tb_results <- tb_results %>% 
+        dplyr::filter(effect == 1, R == i_R, n == 200)
+      
+      features_toSpike <- i_tb_results$fit[[4]]$feature %>% 
+                  stringr::str_subset("TP")
+      features_nonSpike <- i_tb_results$fit[[4]]$feature %>% 
+        setdiff(features_toSpike)
+      
+      tb_truth <- rbind(tibble::tibble(feature = features_toSpike,
+                                       effect = 1,
+                                       method = "Truth",
+                                       q = 0),
+                        tibble::tibble(feature = features_nonSpike,
+                                       effect = 0,
+                                       method = "Truth",
+                                       q = 1)) %>% 
+        dplyr::mutate(feature = factor(feature, levels = c(features_toSpike, features_nonSpike)))
+      
+      tb_methods <- c("DESeq2", "edgeR", "limmaVOOM", "MaAsLin2") %>% 
+        purrr::map_dfr(
+          function(i_method) {
+            i_tb_results %>% 
+              dplyr::filter(method == i_method) %>% 
+              {extract2(., "fit")[[1]]} %>% 
+              dplyr::rename(effect = coef,
+                            q = qval) %>% 
+              dplyr::mutate(method = i_method) %>% 
+              dplyr::select(feature, effect, method, q)
+          }
+        )
+      
+      rbind(tb_truth, tb_methods) %>% 
+        dplyr::mutate(feature = factor(feature, levels = c(features_toSpike,
+                                                           features_nonSpike)) %>% 
+                        as.integer(),
+                      method = method %>% forcats::as_factor()) %>% 
+        dplyr::mutate(R = i_R)
+    })
+
+p_sanity <- tb_plot %>% 
+  ggplot(aes(x = feature, 
+             y = effect,
+             alpha = q < 0.05,
+             color = effect > 0)) +
+  geom_point() +
+  scale_alpha_manual(values = c("TRUE" = 1, "FALSE" = 0.1)) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "blue")) +
+  facet_grid(method~R, scales = "free_y") +
+  theme(axis.text.x = element_blank())
+
+print(p_zero)
+print(p_power)
+print(p_FDR)
+print(p_sanity)
+
+tb_results %>% 
+  dplyr::filter(method == "DESeq2", effect == 0.5, R == 1, n == 50) %>% 
+  {.$fit[[1]]} %>%
+  View()
+
+fit <- tb_results %>% 
+  dplyr::filter(effect == 0.5,
+                n == 200,
+                method == "DESeq2",
+                direction == "opposite",
+                spike_property == "both",
+                R == 2) %>% 
+  {extract2(., "fit")[[1]]} %>% 
+  dplyr::arrange(pval)
+
+tmp <- tb_results %>% 
+  dplyr::filter(effect == 0.5,
+                n == 200,
+                method == "DESeq2",
+                direction == "opposite",
+                spike_property == "both") %>% 
+  extract2(., "fit") %>% 
+  purrr::imap_dfr(
+    ~.x %>% 
+      dplyr::mutate(R = .y)
+  ) %>% 
+  dplyr::arrange(R, pval) %>% 
+  dplyr::filter(qval < 0.05)
+
+View(fit)
+
+i_job_sim <- tb_results %>% 
+  dplyr::filter(effect == 0,
+                n == 200,
+                method == "DESeq2",
+                direction == "same",
+                spike_property == "both",
+                R == 20) %>% 
+  extract2("i_job_sim")
+load("results/Benchmarking/Simulation/359_count.RData")
+mat_norm <- t(mat_count_simulated) %>% 
+  apply(1, function(x) x / sum(x))
+apply(mat_norm, 1, function(x) log(max(x)) - mean(log(x[x > 0]))) %>% hist(breaks = 30)
+
+boxplot(mat_norm["k__Bacteria|p__Bacteroidetes|c__Bacteroidia|o__Bacteroidales|f__Bacteroidaceae|g__Bacteroides|s__Bacteroides_thetaiotaomicron", metadata[, 1] == 0],
+        mat_norm["k__Bacteria|p__Bacteroidetes|c__Bacteroidia|o__Bacteroidales|f__Bacteroidaceae|g__Bacteroides|s__Bacteroides_thetaiotaomicron", metadata[, 1] == 1])
+
+load("results/Benchmarking/Simulation/399_count.RData")
+load("results/Benchmarking/Simulation/399_metadata.RData")
+hist(apply(mat_count_simulated > 0, 1, mean))
+mean(apply(mat_count_simulated > 0, 1, mean) < 0.1)
+
+mat_norm <- t(mat_count_simulated) %>% 
+  apply(1, function(x) x / sum(x))
+boxplot(mat_norm["k__Bacteria|p__Bacteroidetes|c__Bacteroidia|o__Bacteroidales|f__Bacteroidaceae|g__Bacteroides|s__Bacteroides_thetaiotaomicron", metadata[, 1] == 0],
+        mat_norm["k__Bacteria|p__Bacteroidetes|c__Bacteroidia|o__Bacteroidales|f__Bacteroidaceae|g__Bacteroides|s__Bacteroides_thetaiotaomicron", metadata[, 1] == 1])
+
+for(i in seq(1, 10))
+  hist(log10(mat_norm[i, ] %>% setdiff(0)))
+
+tb_results_old %>% 
+  dplyr::filter(effect == 4,
+                n == 200,
+                method == "DESeq2",
+                R == 1) %>% 
+  {extract2(., "fit")[[1]]} %>%
+  View()
+
+i_job_sim_old <- tb_results_old %>% 
+  dplyr::filter(effect == 0,
+                n == 200,
+                method == "DESeq2",
+                R == 1) %>% 
+  extract2("i_job_sim")
+
+load("results/Benchmarking_comparison/Simulation/201_count.RData")
+load("results/Benchmarking_comparison/Simulation/201_metadata.RData")
+
+mat_norm <- mat_count_simulated %>% 
+  apply(1, function(x) x / sum(x))
+for(i in seq(1, 10))
+  hist(log10(mat_norm[i, ] %>% setdiff(0)))
+boxplot(log10(mat_norm["Feature53", metadata[, 1] == 0] %>% setdiff(0)),
+        log10(mat_norm["Feature53", metadata[, 1] == 1] %>% setdiff(0)))
+```
