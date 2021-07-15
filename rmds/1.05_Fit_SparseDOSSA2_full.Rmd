@@ -1,5 +1,5 @@
 ---
-title: "Fit SparseDOSSA 2"
+title: "Fit SparseDOSSA 2 full datasets"
 output: html_document
 ---
 
@@ -11,9 +11,9 @@ library(ggplot2)
 
 ```{r setup2, include=FALSE}
 # Registry
-# batchtools::makeRegistry(file.dir = "r_batchtools_reg/fit_SparseDOSSA2/",
+# batchtools::makeRegistry(file.dir = "r_batchtools_reg/fit_SparseDOSSA2_full/",
 #                          package = "magrittr")
-batchtools::loadRegistry(file.dir = "r_batchtools_reg/fit_SparseDOSSA2", 
+batchtools::loadRegistry(file.dir = "r_batchtools_reg/fit_SparseDOSSA2_full/", 
                          writeable = TRUE)
 batchtools::clearRegistry()
 
@@ -23,48 +23,28 @@ partition <- "shared"
 walltime <- 48 * 3600
 
 # Output dir
-dir_output <- "results/fitted/SparseDOSSA2/"
+dir_output <- "results/fitted/SparseDOSSA2_full/"
 dir.create(dir_output, recursive = TRUE, showWarnings = FALSE)
 ```
 
 ```{r setup simulation params}
-set.seed(1)
-tb_data <- tidyr::expand_grid(
-  dataset = c("stool", "vaginal", "IBD"),
-  K_split = seq(1, 5)
-) %>% 
-  dplyr::group_by(dataset, K_split) %>% 
-  dplyr::mutate(training = {
-    load(paste0("data/physeqs/", dataset[1], ".RData"))
-    n_sample <- get(paste0("physeq_", dataset[1], "_bl")) %>% 
-      phyloseq::nsamples()
-    sample.int(n_sample, round(n_sample / 2)) %>% list()
-  }) %>% 
-  dplyr::ungroup()
-save(tb_data, file = "results/fitted/tb_data.RData")
-
-tb_job_SparseDOSSA2 <- tb_data %>% 
+tb_job <-
   tidyr::expand_grid(
-    lambdas = 10^seq(from = 0, to = -3, length.out = 7),
-    method = "SparseDOSSA2"
+    dataset = c("stool", "vaginal", "IBD"),
+    lambdas = 10^seq(from = 0, to = -3, length.out = 7)
   ) %>% 
   dplyr::mutate(i_job = seq_len(dplyr::n()))
-save(tb_job_SparseDOSSA2, file = paste0(dir_output, "tb_job_SparseDOSSA2.RData"))
+save(tb_job, file = paste0(dir_output, "tb_job.RData"))
 ```
 
 ```{r simulation task}
 one_job <- function(i_job) {
   future::plan(list(future::sequential, future::sequential, future::multicore))
-  i_tb_job <- tb_job_SparseDOSSA2[i_job, ]
+  i_tb_job <- tb_job[i_job, ]
   
   load(paste0("data/physeqs/", i_tb_job$dataset, ".RData"))
   x_samples <- 
     get(paste0("physeq_", i_tb_job$dataset, "_bl")) %>%
-    {
-      phyloseq::prune_samples(seq_len(phyloseq::nsamples(.)) %in%
-                                i_tb_job$training[[1]], .)
-    } %>% 
-    smar::prune_taxaSamples() %>% 
     smar::otu_table2()
   
   # fit SparseDOSSA 2
@@ -82,12 +62,10 @@ one_job <- function(i_job) {
 ```
 
 ```{r submit jobs}
-time_start <- Sys.time()
 tb_ids <- batchtools::batchMap(one_job, 
-                               i_job = tb_job_SparseDOSSA2$i_job)
+                               i_job = tb_job$i_job)
 batchtools::batchExport(mget(ls()))
 batchtools::submitJobs(resources =  list(ncpus = ncpus, 
                                          partition = partition, 
                                          walltime = walltime))
-print(Sys.time() - time_start)
 ```

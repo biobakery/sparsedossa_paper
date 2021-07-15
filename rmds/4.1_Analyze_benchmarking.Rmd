@@ -11,18 +11,15 @@ library(ggplot2)
 ```{r load results}
 # generate results
 load("results/all_comparison/tb_job.RData")
-# batchtools::loadRegistry(file.dir = "r_batchtools_reg/all_comparison", 
-#                          writeable = FALSE)
 tb_results <- tb_job %>% 
   tidyr::expand_grid(r = seq(1, 20)) %>% 
-  # dplyr::filter(i_job %in% batchtools::findDone()$job.id) %>% 
   dplyr::group_by(i_job, r) %>% 
   dplyr::mutate(fit = {
     load(paste0("results/all_comparison/fit_", i_job, "_", r, ".RData"))
     list(fit)
   }) %>% 
   dplyr::ungroup() %>% 
-  dplyr::mutate(Method = factor(method, levels = c("DESeq2", "edgeR", "limmaVOOM", "ANCOM", "MaAsLin2")))
+  dplyr::mutate(Method = factor(method, levels = c("limmaVOOM", "ANCOM", "MaAsLin2")))
 
 tb_summary_null <- tb_results %>% 
   dplyr::filter(effect == 0) %>% 
@@ -41,8 +38,8 @@ tb_summary_null <- tb_results %>%
   dplyr::summarise(
     FDR = mean(n_FP_q / (n_P_q + 1e-10)),
     FDR_sd = sd(n_FP_q / (n_P_q + 1e-10)) / sqrt(500),
-    FPR = mean(n_FP_p / 330),
-    FPR_sd = sd(n_FP_p / 330) / sqrt(500)
+    FPR = mean(n_FP_p / 332),
+    FPR_sd = sd(n_FP_p / 332) / sqrt(500)
   ) %>%
   dplyr::ungroup()
 
@@ -65,8 +62,8 @@ tb_summary_nonNull <- tb_results %>%
   dplyr::summarise(
     Power = mean(n_TP_p / n_T),
     Power_sd = sd(n_TP_p / n_T) / sqrt(500),
-    FPR = mean(n_FP_p / 315),
-    FPR_sd = sd(n_FP_p / 315) / sqrt(500),
+    FPR = mean(n_FP_p / 316),
+    FPR_sd = sd(n_FP_p / 316) / sqrt(500),
     Recall = mean(n_TP_q / n_T),
     Recall_sd = sd(n_TP_q / n_T) / sqrt(500),
     FDR = mean(n_FP_q / (n_P_q + 1e-10)),

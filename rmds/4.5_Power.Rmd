@@ -1,12 +1,10 @@
 ---
 title: "Power analysis"
 author: "Siyuan Ma"
-date: "9/9/2020"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_knit$set(root.dir = "/n/janson_lab/lab/sma/sparsedossa_paper/")
 knitr::opts_chunk$set(echo=FALSE)
 library(magrittr)
 library(ggplot2)
@@ -22,10 +20,10 @@ batchtools::clearRegistry()
 
 # Grid parameters
 ncpus <- 1
-partition <- "janson,janson_cascade,shared"
+partition <- "shared"
 walltime <- 3600
 
-dir_output <- "/n/janson_lab/lab/sma/sparsedossa_paper/results/Power_analysis/"
+dir_output <- "results/Power_analysis/"
 dir.create(dir_output, recursive = TRUE)
 ```
 

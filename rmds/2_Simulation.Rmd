@@ -4,7 +4,6 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_knit$set(root.dir = "/n/janson_lab/lab/sma/sparsedossa_paper/")
 knitr::opts_chunk$set(echo=FALSE)
 library(magrittr)
 library(ggplot2)
@@ -20,10 +19,10 @@ batchtools::clearRegistry()
 
 # Grid parameters
 ncpus <- 1
-partition <- "janson,janson_cascade,shared"
+partition <- "shared"
 walltime <- 5 * 3600
 
-dir_output <- "/n/janson_lab/lab/sma/sparsedossa_paper/results/Simulation/"
+dir_output <- "results/Simulation/"
 dir.create(dir_output, recursive = TRUE)
 ```
 
@@ -96,7 +95,7 @@ one_job <- function(i_job) {
     smar::sample_data2() %>% {.$read_depth[i_tb_job$training[[1]]]}
   fit <- i_tb_job$fit[[1]]
   
-  time_start <- Sys.time()  
+  time_start <- Sys.time()
   if(i_tb_job$method == "SparseDOSSA2") {
     sim_SparseDOSSA2 <- SparseDOSSA2::SparseDOSSA2(template = fit,
                                                    n_sample = n_sample,
@@ -105,17 +104,17 @@ one_job <- function(i_job) {
     time <- Sys.time() - time_start
     save(sim_SparseDOSSA2, 
          file = paste0(dir_output, "SparseDOSSA2_", i_job, ".RData"))
-    # sim_data <- vapply(
-    #   seq_len(n_sample),
-    #   function(i_sample) {
-    #     rmultinom(
-    #       n = 1,
-    #       size = lib_size[i_sample],
-    #       prob = sim_SparseDOSSA2$simulated_matrices$rel[, i_sample])
-    #   },
-    #   rep(0, nrow(sim_SparseDOSSA2$simulated_matrices$rel)))
-    # # sim_data <- sim_SparseDOSSA2$simulated_data
-    # taxa_names <- fit$EM_fit$fit$pi0 %>% names()
+    sim_data <- vapply(
+      seq_len(n_sample),
+      function(i_sample) {
+        rmultinom(
+          n = 1,
+          size = lib_size[i_sample],
+          prob = sim_SparseDOSSA2$simulated_matrices$rel[, i_sample])
+      },
+      rep(0, nrow(sim_SparseDOSSA2$simulated_matrices$rel)))
+    sim_data <- sim_SparseDOSSA2$simulated_data
+    taxa_names <- fit$EM_fit$fit$pi0 %>% names()
   }
     
   if(i_tb_job$method == "metaSPARSim") {
@@ -126,28 +125,28 @@ one_job <- function(i_job) {
     taxa_names <- fit$group$intensity %>% names()
   }
   
-  if(i_tb_job$method == "DMM") {
-    sim_DMM <- 
+  if(i_tb_job$method == "DM") {
+    sim_DM <- 
       MCMCpack::rdirichlet(n = n_sample,
                            alpha = fit$gamma) %>% 
       t()
-    save(sim_DMM, file = paste0(dir_output, "DMM_", i_job, ".RData"))
+    save(sim_DM, file = paste0(dir_output, "DM_", i_job, ".RData"))
     sim_data <- vapply(seq_len(n_sample),
                        function(i_sample) {
                          rmultinom(n = 1,
                                    size = lib_size[i_sample],
-                                   prob = sim_DMM[, i_sample])
+                                   prob = sim_DM[, i_sample])
                        },
-                       rep(0, nrow(sim_DMM)))
+                       rep(0, nrow(sim_DM)))
     time <- Sys.time() - time_start
         taxa_names <- names(fit$pi)
   }
   
-  # dimnames(sim_data) <- list(taxa_names,
-  #                            paste0("Sample", seq_len(n_sample)))
-  # 
-  # save(sim_data, file = paste0(dir_output, i_job, ".RData"))
-  save(time, file = paste0(dir_output, "time/time_", i_job, ".RData"))
+  dimnames(sim_data) <- list(taxa_names,
+                             paste0("Sample", seq_len(n_sample)))
+
+  save(sim_data, file = paste0(dir_output, i_job, ".RData"))
+  save(time, file = paste0(dir_output, "time_", i_job, ".RData"))
 }
 ```
 

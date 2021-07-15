@@ -154,20 +154,6 @@ data_shannon <-
   dplyr::mutate(data = factor(data, 
                               levels = c("Chow", "TRF", "TCF", "TCR")))
 
-p_shannon <- data_shannon %>% 
-  ggplot(aes(x = data, 
-             y = Shannon)) +
-  geom_boxplot(aes(color = data), outlier.shape = NA) +
-  geom_point(position = position_jitter(width = 0.15)) +
-  theme_bw() +
-  scale_color_manual(values = c("Chow" = "grey",
-                               "TRF" = "orange",
-                               "TCF" = "darkgreen",
-                               "TCR" = "lightgreen"),
-                    guide = FALSE) +
-  theme(axis.title.x = element_blank()) +
-  ylab("Shannon index")
-
 mat_tax <- smar::tax_table2(physeq_mouse)
 otus <- rownames(l_sim[[1]])
 phyla <- mat_tax[otus, 2]
@@ -186,20 +172,6 @@ data_ratio <-
   dplyr::mutate(data = factor(data, 
                               levels = c("Chow", "TRF", "TCF", "TCR")))
 
-p_ratio <- data_ratio %>% 
-  ggplot(aes(x = data, 
-             y = ratio)) +
-  geom_boxplot(aes(color = data), outlier.shape = NA) +
-  geom_point(position = position_jitter(width = 0.15)) +
-  theme_bw() +
-  scale_color_manual(values = c("Chow" = "grey",
-                               "TRF" = "orange",
-                               "TCF" = "darkgreen",
-                               "TCR" = "lightgreen"),
-                    guide = FALSE) +
-  theme(axis.title.x = element_blank()) +
-  ylab("Firmicutes/Bacteroidetes")
-
 data_abs <- 
   tibble::tibble(
     abs = c(apply(l_sim_abs[[1]], 2, sum)[1:20],
@@ -209,25 +181,4 @@ data_abs <-
   ) %>% 
   dplyr::mutate(data = factor(data, 
                               levels = c("Chow", "TRF", "TCF", "TCR")))
-
-p_abs <- data_abs %>% 
-  ggplot(aes(x = data, 
-             y = log10(abs))) +
-  geom_boxplot(aes(color = data), outlier.shape = NA) +
-  geom_point(position = position_jitter(width = 0.15)) +
-  theme_bw() +
-  scale_color_manual(values = c("Chow" = "grey",
-                               "TRF" = "orange",
-                               "TCF" = "darkgreen",
-                               "TCR" = "lightgreen"),
-                    guide = FALSE) +
-  theme(axis.title.x = element_blank()) +
-  ylab("Absolute abundance")
-
-
-cowplot::plot_grid(p, p_shannon, p_ratio, p_abs,
-                   labels = c("A", "B", "C", "D"),
-                   rel_widths = c(2, 1, 1, 1),
-                   nrow = 1) %>% 
-ggsave("figures/Fig5/Fig5.pdf", ., width = 12, height = 5)
 ```

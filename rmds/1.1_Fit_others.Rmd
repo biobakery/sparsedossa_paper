@@ -4,7 +4,6 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_knit$set(root.dir = "/n/janson_lab/lab/sma/sparsedossa_paper/")
 knitr::opts_chunk$set(echo=FALSE)
 library(magrittr)
 library(ggplot2)
@@ -19,11 +18,11 @@ batchtools::clearRegistry()
 
 # Grid parameters
 ncpus <- 1
-partition <- "janson_cascade,janson,shared"
+partition <- "shared"
 walltime <- 1 * 3600
 
 # Output dir
-dir_output <- "/n/janson_lab/lab/sma/sparsedossa_paper/results/fitted/Others/"
+dir_output <- "results/fitted/Others/"
 dir.create(dir_output, recursive = TRUE, showWarnings = FALSE)
 ```
 
@@ -31,7 +30,7 @@ dir.create(dir_output, recursive = TRUE, showWarnings = FALSE)
 load("results/fitted/tb_data.RData")
 tb_job_others <- tb_data %>% 
   tidyr::expand_grid(
-    method = c("metaSPARSim", "DMM")
+    method = c("metaSPARSim", "DM")
   ) %>% 
   dplyr::mutate(i_job = seq_len(dplyr::n()))
 save(tb_job_others, file = paste0(dir_output, "tb_job_others.RData"))
@@ -64,7 +63,7 @@ one_job <- function(i_job) {
     save(fit_metaSPARSim, file = paste0(dir_output, "fit_", i_job, ".RData"))
   }
   
-  if(i_tb_job$method == "DMM") {
+  if(i_tb_job$method == "DM") {
     fit_DMM <- dirmult::dirmult(t(x_samples),
                                 epsilon = 0.01,
                                 trace = FALSE)

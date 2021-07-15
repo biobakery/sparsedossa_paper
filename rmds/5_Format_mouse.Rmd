@@ -1,7 +1,6 @@
 ---
 title: "Format mouse data"
 author: "Siyuan Ma"
-date: "10/2/2020"
 output: html_document
 ---
 

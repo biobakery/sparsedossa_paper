@@ -1,7 +1,6 @@
 ---
 title: "Power analysis summary"
 author: "Siyuan Ma"
-date: "11/15/2020"
 output: html_document
 ---
 

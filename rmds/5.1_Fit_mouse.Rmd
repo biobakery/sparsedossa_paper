@@ -1,0 +1,82 @@
+---
+title: "Fit mouse data"
+author: "Siyuan Ma"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/n/janson_lab/lab/sma/sparsedossa_paper/")
+knitr::opts_chunk$set(echo=FALSE)
+library(magrittr)
+library(ggplot2)
+```
+
+```{r setup2, include=FALSE}
+# Registry
+# batchtools::makeRegistry(file.dir = "r_batchtools_reg/fit_mouse/",
+#                          package = "magrittr")
+batchtools::loadRegistry(file.dir = "r_batchtools_reg/fit_mouse", 
+                         writeable = TRUE)
+batchtools::clearRegistry()
+
+# Grid parameters
+ncpus <- 21
+partition <- "shared"
+walltime <- 5 * 3600
+
+# Output dir
+dir_output <- "/n/janson_lab/lab/sma/sparsedossa_paper/results/mouse/"
+dir.create(dir_output, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r setup fitting grid}
+tb_job <- tibble::tibble(
+  day = c(0, 1, 1, 5, 5),
+  diet = c("Chow", "Meat", "Tuber", "Meat", "Tuber")) %>% 
+  tidyr::expand_grid(
+  lambdas = 10^seq(from = 0, to = -2, length.out = 5)) %>% 
+  dplyr::mutate(i_job = seq_len(dplyr::n()))
+save(tb_job, file = paste0(dir_output, "tb_job.RData"))
+```
+
+
+```{r one job}
+one_job <- function(i_job) {
+  set.seed(i_job)
+  future::plan(list(future::sequential, future::sequential, future::multicore))
+  i_tb_job <- tb_job[i_job, ]
+  
+  load("data/mouse/physeq_mouse.RData")
+  physeq_mouse <- physeq_mouse_filtered %>% 
+    phyloseq::transform_sample_counts(function(x) x / sum(x))
+  
+  df_sample <- smar::sample_data2(physeq_mouse)
+  x_samples <- smar::otu_table2(physeq_mouse)
+  
+  x_samples <- x_samples[, 
+                         df_sample$Day.as.listed.in.MS.SI == i_tb_job$day &
+                         df_sample$diet_overall == i_tb_job$diet]
+  
+  fit_EM <- SparseDOSSA2::fitCV_SparseDOSSA2(
+    data = x_samples,
+    lambdas = i_tb_job$lambdas,
+    K = 5,
+    control = list(abs_tol = 1e-2,
+                   rel_tol = 1e-3,
+                   maxit = 20,
+                   verbose = TRUE,
+                   debug_dir = paste0(dir_output, i_job, "/")))
+  save(fit_EM, file = paste0(dir_output, "fit_", i_job, ".RData"))
+}
+```
+
+```{r submit jobs}
+time_start <- Sys.time()
+tb_ids <- batchtools::batchMap(one_job, 
+                               i_job = tb_job$i_job)
+batchtools::batchExport(mget(ls()))
+batchtools::submitJobs(resources =  list(ncpus = ncpus, 
+                                         partition = partition, 
+                                         walltime = walltime))
+print(Sys.time() - time_start)
+```
