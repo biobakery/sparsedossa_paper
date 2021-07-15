@@ -1,0 +1,4 @@
+* rmds/ include rmarkdown files for running simulations/evaluations performed 
+  for the manuscript.
+* R/ has additional helper scripts
+* data/ has raw data files needed for fittings/simulations
