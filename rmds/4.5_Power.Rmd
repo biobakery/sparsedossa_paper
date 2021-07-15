@@ -1,0 +1,129 @@
+---
+title: "Power analysis"
+author: "Siyuan Ma"
+date: "9/9/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/n/janson_lab/lab/sma/sparsedossa_paper/")
+knitr::opts_chunk$set(echo=FALSE)
+library(magrittr)
+library(ggplot2)
+```
+
+```{r setup2}
+# Registry
+# batchtools::makeRegistry(file.dir = "r_batchtools_reg/Power_analysis",
+#                          package = "magrittr")
+batchtools::loadRegistry(file.dir = "r_batchtools_reg/Power_analysis", 
+                         writeable = TRUE)
+batchtools::clearRegistry()
+
+# Grid parameters
+ncpus <- 1
+partition <- "janson,janson_cascade,shared"
+walltime <- 3600
+
+dir_output <- "/n/janson_lab/lab/sma/sparsedossa_paper/results/Power_analysis/"
+dir.create(dir_output, recursive = TRUE)
+```
+
+```{r simulation}
+tb_sim <- tidyr::expand_grid(
+  n = seq(100, 1000, by = 100),
+  effect = c(0.5, 1, 2),
+  R = seq(1, 500)
+) %>%
+  dplyr::mutate(i_job_sim = seq(1, dplyr::n()))
+
+features_toSpike <- 
+  "k__Bacteria|p__Proteobacteria|c__Gammaproteobacteria|o__Enterobacteriales|f__Enterobacteriaceae|g__Escherichia|s__Escherichia_coli"
+
+dir.create(paste0(dir_output, "Simulation/"))
+save(features_toSpike, file = paste0(dir_output, "Simulation/", "features_toSpike.RData"))
+```
+
+```{r job grid}
+tb_job <- tb_sim %>% 
+  dplyr::mutate(method = c(
+    "MaAsLin2"
+  )) %>% 
+  dplyr::mutate(i_job = seq(1, dplyr::n()))
+save(tb_job, file = paste0(dir_output, "tb_job.RData"))
+n_job <- nrow(tb_job)
+rm(list = c("tb_sim", "tb_job"))
+```
+
+```{r one job}
+one_job <- function(i_job) {
+  load(paste0(dir_output, "tb_job.RData"))
+  load("results/fitted/SparseDOSSA2_stool.RData")
+  
+  i_tb_job <- tb_job[i_job, ]
+  
+  p <- seq(1, 10) %>% 
+    purrr::map_dbl(function(i_RR) {
+      metadata <- matrix(rbinom(n = i_tb_job$n, size = 1, prob = 0.5),
+                         nrow = i_tb_job$n,
+                         ncol = 1)
+      effect_sizes <- i_tb_job$effect
+      
+      df_spike <- 
+        data.frame(
+          metadata_datum = 1,
+          feature_spiked = features_toSpike,
+          associated_property = "abundance",
+          effect_size = effect_sizes)
+      
+      fit_simulation <- SparseDOSSA2::SparseDOSSA2(
+        template = fit_SparseDOSSA2,
+        n_sample = i_tb_job$n,
+        new_features = FALSE,
+        spike_metadata = "both",
+        feature_metadata_spike_df = df_spike,
+        metadata_matrix = metadata
+      )
+      
+      mat_count_simulated <- fit_simulation$simulated_data
+      save(metadata,
+           file = paste0(dir_output, "Simulation/", i_job, "_", i_RR,
+                         "_metadata.RData"))
+      save(mat_count_simulated,
+           file = paste0(dir_output, "Simulation/", i_job,  "_", i_RR,
+                         "_count.RData"))
+      
+      metadata <- as.data.frame(metadata)
+      colnames(metadata) <- "datum1"
+      rownames(metadata) <- 
+        colnames(mat_count_simulated) <- 
+        paste0("Sample", seq(1, ncol(mat_count_simulated)))
+      
+      dir.create(paste0(dir_output, "Maaslin2/"), showWarnings = FALSE) 
+      fit <- Maaslin2::Maaslin2(input_data = mat_count_simulated,
+                                input_metadata = metadata, 
+                                output = paste0(dir_output, "Maaslin2/", 
+                                                i_tb_job$i_job, "_", i_RR),
+                                fixed_effects = "datum1",
+                                normalization = "TSS", 
+                                transform = "LOG")
+      fit <- fit$results[, c("feature", "metadata", "coef", "pval", "qval")]
+      fit$feature <- fit$feature %>% 
+        stringr::str_replace_all(stringr::fixed("."),
+                                 stringr::fixed("|"))
+      result <- fit %>% dplyr::filter(feature == features_toSpike) %>% extract2("pval")
+      return(result)
+    })
+  save(p, file = paste0(dir_output, "p_", i_tb_job$i_job, ".RData"))
+}
+```
+
+```{r submit jobs}
+tb_ids <- batchtools::batchMap(one_job,
+                               i_job = seq(1, n_job))
+batchtools::batchExport(mget(ls()))
+batchtools::submitJobs(ids = tb_ids$job.id,
+                       resources =  list(ncpus = ncpus, 
+                                         partition = partition, 
+                                         walltime = walltime))
+```

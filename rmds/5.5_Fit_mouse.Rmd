@@ -1,0 +1,196 @@
+---
+title: "Fit mouse data"
+author: "Siyuan Ma"
+date: "10/2/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/n/janson_lab/lab/sma/sparsedossa_paper/")
+knitr::opts_chunk$set(echo=FALSE)
+library(magrittr)
+library(ggplot2)
+```
+
+```{r setup2, include=FALSE}
+# Registry
+# batchtools::makeRegistry(file.dir = "r_batchtools_reg/fit_mouse/",
+#                          package = "magrittr")
+batchtools::loadRegistry(file.dir = "r_batchtools_reg/fit_mouse", 
+                         writeable = TRUE)
+batchtools::clearRegistry()
+
+# Grid parameters
+ncpus <- 21
+partition <- "janson_cascade,janson,janson_bigmem,shared"
+walltime <- 5 * 3600
+
+# Output dir
+dir_output <- "/n/janson_lab/lab/sma/sparsedossa_paper/results/mouse/"
+dir.create(dir_output, recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r setup fitting grid}
+tb_job <- tibble::tibble(
+  day = c(0, 1, 1, 5, 5),
+  diet = c("Chow", "Meat", "Tuber", "Meat", "Tuber")) %>% 
+  tidyr::expand_grid(
+  lambdas = 10^seq(from = 0, to = -2, length.out = 5)) %>% 
+  dplyr::mutate(i_job = seq_len(dplyr::n()))
+save(tb_job, file = paste0(dir_output, "tb_job.RData"))
+```
+
+
+```{r one job}
+one_job <- function(i_job) {
+  set.seed(i_job)
+  future::plan(list(future::sequential, future::sequential, future::multicore))
+  i_tb_job <- tb_job[i_job, ]
+  
+  load("data/mouse/physeq_mouse.RData")
+  physeq_mouse <- physeq_mouse_filtered %>% 
+    phyloseq::transform_sample_counts(function(x) x / sum(x))
+  
+  df_sample <- smar::sample_data2(physeq_mouse)
+  x_samples <- smar::otu_table2(physeq_mouse)
+  
+  x_samples <- x_samples[, 
+                         df_sample$Day.as.listed.in.MS.SI == i_tb_job$day &
+                         df_sample$diet_overall == i_tb_job$diet]
+  
+  fit_EM <- SparseDOSSA2::fitCV_SparseDOSSA2(
+    data = x_samples,
+    lambdas = i_tb_job$lambdas,
+    K = 5,
+    control = list(abs_tol = 1e-2,
+                   rel_tol = 1e-3,
+                   maxit = 20,
+                   verbose = TRUE,
+                   debug_dir = paste0(dir_output, i_job, "/")))
+  save(fit_EM, file = paste0(dir_output, "fit_", i_job, ".RData"))
+}
+```
+
+```{r submit jobs}
+time_start <- Sys.time()
+tb_ids <- batchtools::batchMap(one_job, 
+                               i_job = tb_job$i_job)
+batchtools::batchExport(mget(ls()))
+batchtools::submitJobs(resources =  list(ncpus = ncpus, 
+                                         partition = partition, 
+                                         walltime = walltime))
+print(Sys.time() - time_start)
+```
+
+```{r debugging}
+# i_job <- 11
+# i_tb_job <- tb_job[i_job, ]
+#   
+# load("data/mouse/physeq_mouse.RData")
+# physeq_mouse <- physeq_mouse_filtered %>% 
+#   phyloseq::transform_sample_counts(function(x) x / sum(x))
+# 
+# df_sample <- smar::sample_data2(physeq_mouse)
+# x_samples <- smar::otu_table2(physeq_mouse)
+# 
+# x_samples <- x_samples[, 
+#                        df_sample$Day.as.listed.in.MS.SI == i_tb_job$day &
+#                          df_sample$diet_overall == i_tb_job$diet]
+#   
+# data = x_samples
+# lambdas = i_tb_job$lambdas
+# K = 5
+# control = list(abs_tol = 1e-2,
+#                rel_tol = 1e-3,
+#                maxit = 20,
+#                verbose = TRUE,
+#                debug_dir = paste0(dir_output, i_job, "/"))
+# 
+# smar::sourceDir("../sparsedossa_update/SparseDOSSA2/R/")
+# control <- do.call(control_fit, control)
+# 
+# l_filtering <- filter_data(data)
+# data <- data[l_filtering$ind_sample, l_filtering$ind_feature, drop = FALSE]
+# if(!is.null(control$debug_dir))
+#   dir.create(control$debug_dir)
+# 
+# 
+# # normalize data
+# data <- t(apply(data, 1, TSS, correct = TRUE))
+#   
+#   # CV EM fitting
+# if(control$verbose)
+#   message("Fitting EM algorithm with cross-validation...")
+#   EM_fit <- EM_CV(data = data,
+#                   lambdas = lambdas, 
+#                   K = K,
+#                   control = control)
+#   
+#   # fit per-feature parameter 3d Gaussian kernel density
+#   if(control$verbose)
+#     message("Fitting joint distribution of per-feature parameters...")
+#   F_fit <- fit_F(feature_param = cbind("pi0" = EM_fit$fit$pi0,
+#                                        "mu" = EM_fit$fit$mu,
+#                                        "sigma" = EM_fit$fit$sigma))
+#   
+#   return(list(EM_fit = EM_fit,
+#               F_fit = F_fit,
+#               depth_fit = depth_fit,
+#               l_filtering = l_filtering))
+#   
+# load("results/mouse/11/CV_folds.RData")
+#   if(!is.null(control$debug_dir))
+#     save(CV_folds, file = paste0(control$debug_dir, "/CV_folds.RData"))
+#   ll_results_CV <- list()
+#   for(k in seq_len(K)) {
+#     if(control$verbose) 
+#       message("Performing CV k=", k)
+#     ll_results_CV[[k]] <- future::future({
+#       data_training <- data[CV_folds != k, ]
+#       data_testing <- data[CV_folds == k, ]
+#       
+#       l_fits_k <- 
+#         future.apply::future_lapply(
+#           seq_along(lambdas),
+#           function(i_lambda) {
+#             control_tmp <- control
+#             control_tmp$verbose <- FALSE
+#             if(!is.null(control$debug_dir))
+#               control_tmp$debug_dir <- paste0(control$debug_dir,
+#                                               "/K_", k,
+#                                               "/lambda_", i_lambda)
+#             EM(data = data_training,
+#                lambda = lambdas[i_lambda],
+#                control = control_tmp)
+#           })
+#       
+#       # Fill in parameters estimates for features not present in training data
+#       for(i_lambda in seq_along(lambdas))
+#         l_fits_k[[i_lambda]]$fit <-
+#         fill_estimates_CV(l_fits_k[[i_lambda]]$fit,
+#                           l_fits_full[[i_lambda]]$fit,
+#                           l_fits_k[[i_lambda]]$l_filtering$ind_feature)
+# 
+#       # Calculate ll in testing data
+#       l_logLik <- future.apply::future_lapply(
+#         seq_along(lambdas),
+#         function(i_lambda) {
+#           params <- l_fits_k[[i_lambda]]$fit
+#           future.apply::future_sapply(
+#             seq_len(nrow(data_testing)),
+#             function(i_sample) {
+#               logLik <-
+#                 dx(x = data_testing[i_sample, , drop = TRUE],
+#                    pi0 = params$pi0, mu = params$mu, sigma = params$sigma,
+#                    Omega = params$Omega, Sigma = params$Sigma,
+#                    control = control$control_numint,
+#                    log.p = TRUE)
+#             })
+#         })
+# 
+#       list(l_fits = l_fits_k,
+#            l_logLik = l_logLik)
+#     })
+#   }
+#   ll_results_CV <- future::values(ll_results_CV)
+```

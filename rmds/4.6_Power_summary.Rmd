@@ -1,0 +1,31 @@
+---
+title: "Power analysis summary"
+author: "Siyuan Ma"
+date: "11/15/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/n/janson_lab/lab/sma/sparsedossa_paper/")
+knitr::opts_chunk$set(echo=FALSE)
+library(magrittr)
+library(ggplot2)
+```
+
+```{r load results}
+batchtools::loadRegistry(file.dir = "r_batchtools_reg/Power_analysis", 
+                         writeable = FALSE)
+load(paste0(dir_output, "tb_job.RData"))
+tb_results <- tb_job %>% 
+  dplyr::group_by(i_job) %>% 
+  dplyr::mutate(p = {
+    load(paste0(dir_output, "p_", i_job, ".RData"))
+    p %>% list()
+  })
+tb_results_summary <- tb_results %>% 
+  dplyr::group_by(n, effect) %>% 
+  dplyr::summarise(power = mean(unlist(p) < 0.05),
+                   sd_power = sd(unlist(p) < 0.05))
+
+save(tb_results_summary, file = paste0("results/Power_analysis/tb_summary.RData"))
+```

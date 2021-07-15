@@ -1,0 +1,233 @@
+---
+title: "Simulate mouse data"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/n/janson_lab/lab/sma/sparsedossa_paper/")
+knitr::opts_chunk$set(echo=FALSE)
+library(magrittr)
+library(ggplot2)
+```
+
+```{r simulate null data for all}
+batchtools::loadRegistry(file.dir = "r_batchtools_reg/fit_mouse", 
+                         writeable = FALSE)
+dir_output <- "/n/janson_lab/lab/sma/sparsedossa_paper/results/mouse/"
+
+tb_results <- tb_job %>% 
+  dplyr::filter(i_job %in% batchtools::findDone()$job.id) %>% 
+  dplyr::group_by(i_job) %>% 
+  dplyr::mutate(fit = {
+    load(paste0(dir_output, "fit_", i_job, ".RData"))
+    list(fit_EM)
+  }) %>% 
+  dplyr::mutate(logLik_CV = 
+                  fit[[1]]$EM_fit$logLik_CV %>% 
+                  setdiff(-Inf) %>% mean()) %>% 
+  dplyr::group_by(day, diet) %>% 
+  dplyr::arrange(-logLik_CV) %>% 
+  dplyr::slice(1) %>% 
+  dplyr::ungroup()
+
+load("data/mouse/physeq_mouse.RData")
+physeq_mouse <- physeq_mouse_filtered %>% 
+    phyloseq::transform_sample_counts(function(x) x / sum(x))
+
+set.seed(1)
+l_sim <- 
+  l_sim_abs <- 
+  l_df_sim <- 
+  list()
+for(i_sim in seq_len(nrow(tb_results))) {
+  i_day <- tb_results$day[i_sim]
+  i_diet <- tb_results$diet[i_sim]
+  i_physeq <- physeq_mouse %>% 
+    phyloseq::subset_samples(Day.as.listed.in.MS.SI == i_day &
+                               diet_overall == i_diet)
+  n_sample <- i_physeq %>% phyloseq::nsamples()
+  i_df <- i_physeq %>% smar::sample_data2()
+  l_df_sim[[i_sim]] <- seq(1, 5) %>% 
+    purrr::map_dfr(~ i_df)
+  
+  sim_SparseDOSSA2 <- SparseDOSSA2::SparseDOSSA2(
+    tb_results$fit[[i_sim]],
+    n_sample = n_sample * 5,
+    new_features = FALSE,
+    spike_metadata = "none"
+  )
+  l_sim[[i_sim]] <- sim_SparseDOSSA2$simulated_matrices$rel
+  l_sim_abs[[i_sim]] <- sim_SparseDOSSA2$simulated_matrices$a_null
+}
+
+mat_sim <- l_sim %>% purrr::reduce(cbind)
+df_sim <- l_df_sim %>% purrr::reduce(rbind)
+
+dist_sim <- vegan::vegdist(t(mat_sim))
+ord <- ape::pcoa(dist_sim)
+perc <- (ord$values$Relative_eig[1:2] * 100) %>% round(digits = 2)
+
+df_plot <- data.frame(`Axis 1` = ord$vectors[, 1],
+                      `Axis 2` = ord$vectors[, 2],
+                      check.names = FALSE) %>% 
+  cbind(df_sim) %>% 
+  dplyr::mutate(shape = ifelse(Day.as.listed.in.MS.SI == 1,
+                               "circle",
+                               "solid"),
+                Date = Day.as.listed.in.MS.SI %>% 
+                  as.character() %>% 
+                  dplyr::recode_factor(
+                    "0" = "Baseline",
+                    "1" = "Day 1",
+                    "5" = "Day 5"
+                  ),
+                Diet = diet_overall %>% 
+                  factor(levels = c("Chow", "Tuber", "Meat")))
+
+p <- df_plot %>% 
+  ggplot(aes(x = `Axis 1`, y = `Axis 2`, 
+             color = Diet)) +
+  geom_point(aes(shape = Date), size = 3) +
+  scale_color_manual(values = c("Chow" = "grey",
+                                "Meat" = "purple",
+                                "Tuber" = "brown")) +
+  scale_shape_manual(values = c("Baseline" = 16,
+                                "Day 1" = 1,
+                                "Day 5" = 16)) +
+  theme_bw() +
+  theme(legend.position = c(1, 0),
+        legend.justification = c(1, 0),
+        legend.background = element_blank(),
+        legend.direction = "horizontal") +
+  xlab(paste0("Axis 1 (", perc[1], "%)")) +
+  ylab(paste0("Axis 2 (", perc[2], "%)")) 
+
+```
+
+```{r simulate spiked data}
+set.seed(1)
+fit_EM <- tb_results %>% 
+  dplyr::filter(day == 5,
+                diet == "Tuber") %>% 
+  extract2("fit") %>% 
+  {.[[1]]}
+
+mat_tax <- smar::tax_table2(physeq_mouse)
+otus <- names(fit_EM$EM_fit$fit$pi0)
+phyla <- mat_tax[otus, 2]
+otus_enrich <- otus[phyla == "p__Bacteroidetes"]
+otus_deplete <- otus[phyla == "p__Firmicutes"]
+
+mat_metadata <- matrix(c(rep(1, 20),
+                         rep(0, 40)),
+                       ncol = 1)
+df_spike_metadata <-
+  rbind(
+    tibble::tibble(metadata_datum = 1,
+                   feature_spiked = otus_enrich,
+                   associated_property = "abundance",
+                   effect_size = log(2)),
+    tibble::tibble(metadata_datum = 1,
+                   feature_spiked = otus_deplete,
+                   associated_property = "abundance",
+                   effect_size = -log(2))
+  )
+
+sim_SparseDOSSA2 <- SparseDOSSA2:::SparseDOSSA2(
+  template = fit_EM,
+  n_sample = 60,
+  new_features = FALSE,
+  spike_metadata = "abundance",
+  metadata_matrix = mat_metadata,
+  feature_metadata_spike_df = df_spike_metadata)
+
+data <- sim_SparseDOSSA2$simulated_matrices$rel
+data_abs <- sim_SparseDOSSA2$simulated_matrices$a_spiked
+
+data_shannon <- 
+  tibble::tibble(
+    Shannon = c(vegan::diversity(t(l_sim[[1]]))[1:20],
+                vegan::diversity(t(data))),
+    data = c(rep("Chow", length = 20),
+             rep(c("TRF", "TCF", "TCR"), each = 20))
+  ) %>% 
+  dplyr::mutate(data = factor(data, 
+                              levels = c("Chow", "TRF", "TCF", "TCR")))
+
+p_shannon <- data_shannon %>% 
+  ggplot(aes(x = data, 
+             y = Shannon)) +
+  geom_boxplot(aes(color = data), outlier.shape = NA) +
+  geom_point(position = position_jitter(width = 0.15)) +
+  theme_bw() +
+  scale_color_manual(values = c("Chow" = "grey",
+                               "TRF" = "orange",
+                               "TCF" = "darkgreen",
+                               "TCR" = "lightgreen"),
+                    guide = FALSE) +
+  theme(axis.title.x = element_blank()) +
+  ylab("Shannon index")
+
+mat_tax <- smar::tax_table2(physeq_mouse)
+otus <- rownames(l_sim[[1]])
+phyla <- mat_tax[otus, 2]
+otus_enrich2 <- otus[phyla == "p__Bacteroidetes"]
+otus_deplete2 <- otus[phyla == "p__Firmicutes"]
+
+data_ratio <- 
+  tibble::tibble(
+    ratio = c((apply(l_sim[[1]][otus_deplete2 ,], 2, sum) / 
+                apply(l_sim[[1]][otus_enrich2 ,], 2, sum))[1:20],
+                apply(data[otus_deplete ,], 2, sum) / 
+                apply(data[otus_enrich ,], 2, sum)),
+    data = c(rep("Chow", length = 20),
+             rep(c("TRF", "TCF", "TCR"), each = 20))
+  ) %>% 
+  dplyr::mutate(data = factor(data, 
+                              levels = c("Chow", "TRF", "TCF", "TCR")))
+
+p_ratio <- data_ratio %>% 
+  ggplot(aes(x = data, 
+             y = ratio)) +
+  geom_boxplot(aes(color = data), outlier.shape = NA) +
+  geom_point(position = position_jitter(width = 0.15)) +
+  theme_bw() +
+  scale_color_manual(values = c("Chow" = "grey",
+                               "TRF" = "orange",
+                               "TCF" = "darkgreen",
+                               "TCR" = "lightgreen"),
+                    guide = FALSE) +
+  theme(axis.title.x = element_blank()) +
+  ylab("Firmicutes/Bacteroidetes")
+
+data_abs <- 
+  tibble::tibble(
+    abs = c(apply(l_sim_abs[[1]], 2, sum)[1:20],
+                apply(data_abs[otus_deplete ,], 2, sum)),
+    data = c(rep("Chow", length = 20),
+             rep(c("TRF", "TCF", "TCR"), each = 20))
+  ) %>% 
+  dplyr::mutate(data = factor(data, 
+                              levels = c("Chow", "TRF", "TCF", "TCR")))
+
+p_abs <- data_abs %>% 
+  ggplot(aes(x = data, 
+             y = log10(abs))) +
+  geom_boxplot(aes(color = data), outlier.shape = NA) +
+  geom_point(position = position_jitter(width = 0.15)) +
+  theme_bw() +
+  scale_color_manual(values = c("Chow" = "grey",
+                               "TRF" = "orange",
+                               "TCF" = "darkgreen",
+                               "TCR" = "lightgreen"),
+                    guide = FALSE) +
+  theme(axis.title.x = element_blank()) +
+  ylab("Absolute abundance")
+
+
+cowplot::plot_grid(p, p_shannon, p_ratio, p_abs,
+                   labels = c("A", "B", "C", "D"),
+                   rel_widths = c(2, 1, 1, 1),
+                   nrow = 1) %>% 
+ggsave("figures/Fig5/Fig5.pdf", ., width = 12, height = 5)
+```
