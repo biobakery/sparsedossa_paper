@@ -95,29 +95,32 @@ one_job <- function(i_job) {
   lib_size <- get(paste0("physeq_", i_tb_job$dataset, "_bl")) %>% 
     smar::sample_data2() %>% {.$read_depth[i_tb_job$training[[1]]]}
   fit <- i_tb_job$fit[[1]]
-    
+  
+  time_start <- Sys.time()  
   if(i_tb_job$method == "SparseDOSSA2") {
     sim_SparseDOSSA2 <- SparseDOSSA2::SparseDOSSA2(template = fit,
                                                    n_sample = n_sample,
                                                    new_feature = FALSE, 
                                                    spike_metadata = "none")
+    time <- Sys.time() - time_start
     save(sim_SparseDOSSA2, 
          file = paste0(dir_output, "SparseDOSSA2_", i_job, ".RData"))
-    sim_data <- vapply(
-      seq_len(n_sample),
-      function(i_sample) {
-        rmultinom(
-          n = 1,
-          size = lib_size[i_sample],
-          prob = sim_SparseDOSSA2$simulated_matrices$rel[, i_sample])
-      },
-      rep(0, nrow(sim_SparseDOSSA2$simulated_matrices$rel)))
-    # sim_data <- sim_SparseDOSSA2$simulated_data
-    taxa_names <- fit$EM_fit$fit$pi0 %>% names()
+    # sim_data <- vapply(
+    #   seq_len(n_sample),
+    #   function(i_sample) {
+    #     rmultinom(
+    #       n = 1,
+    #       size = lib_size[i_sample],
+    #       prob = sim_SparseDOSSA2$simulated_matrices$rel[, i_sample])
+    #   },
+    #   rep(0, nrow(sim_SparseDOSSA2$simulated_matrices$rel)))
+    # # sim_data <- sim_SparseDOSSA2$simulated_data
+    # taxa_names <- fit$EM_fit$fit$pi0 %>% names()
   }
     
   if(i_tb_job$method == "metaSPARSim") {
     sim_metaSPARSim <- metaSPARSim::metaSPARSim(fit)
+    time <- Sys.time() - time_start
     save(sim_metaSPARSim, file = paste0(dir_output, "metaSPARSim_", i_job, ".RData"))
     sim_data <- sim_metaSPARSim$counts
     taxa_names <- fit$group$intensity %>% names()
@@ -136,13 +139,15 @@ one_job <- function(i_job) {
                                    prob = sim_DMM[, i_sample])
                        },
                        rep(0, nrow(sim_DMM)))
-    taxa_names <- names(fit$pi)
+    time <- Sys.time() - time_start
+        taxa_names <- names(fit$pi)
   }
   
-  dimnames(sim_data) <- list(taxa_names,
-                             paste0("Sample", seq_len(n_sample)))
-  
-  save(sim_data, file = paste0(dir_output, i_job, ".RData"))
+  # dimnames(sim_data) <- list(taxa_names,
+  #                            paste0("Sample", seq_len(n_sample)))
+  # 
+  # save(sim_data, file = paste0(dir_output, i_job, ".RData"))
+  save(time, file = paste0(dir_output, "time/time_", i_job, ".RData"))
 }
 ```
 
@@ -150,7 +155,7 @@ one_job <- function(i_job) {
 tb_ids <- batchtools::batchMap(one_job,
                                i_job = jobs)
 batchtools::batchExport(mget(ls()))
-batchtools::submitJobs(ids = seq(1, 75),
+batchtools::submitJobs(tb_ids$job.id,
                        resources =  list(ncpus = ncpus, 
                                          partition = partition, 
                                          walltime = walltime))
